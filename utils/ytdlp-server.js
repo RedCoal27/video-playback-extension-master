@@ -10,6 +10,17 @@ const DOWNLOAD_DIR = process.env.YTDLP_DOWNLOAD_DIR || path.join(os.homedir(), '
 const LOCAL_YTDLP = path.join(__dirname, '..', 'tools', 'yt-dlp.exe');
 const LOCAL_FFMPEG_DIR = path.join(__dirname, '..', 'tools', 'ffmpeg', 'bin');
 const LOCAL_FFMPEG = path.join(LOCAL_FFMPEG_DIR, 'ffmpeg.exe');
+const YOUTUBE_AUDIO_LANGUAGE_CODES = [
+  'af', 'az', 'id', 'ms', 'bs', 'ca', 'cs', 'da', 'de', 'et',
+  'en-IN', 'en-GB', 'en', 'es', 'es-419', 'es-US', 'eu', 'fil',
+  'fr', 'fr-CA', 'gl', 'hr', 'zu', 'is', 'it', 'sw', 'lv', 'lt',
+  'hu', 'nl', 'no', 'uz', 'pl', 'pt-PT', 'pt', 'ro', 'sq', 'sk',
+  'sl', 'sr-Latn', 'fi', 'sv', 'vi', 'tr', 'be', 'bg', 'ky', 'kk',
+  'mk', 'mn', 'ru', 'sr', 'uk', 'el', 'hy', 'iw', 'ur', 'ar', 'fa',
+  'ne', 'mr', 'hi', 'as', 'bn', 'pa', 'gu', 'or', 'ta', 'te', 'kn',
+  'ml', 'si', 'th', 'lo', 'my', 'ka', 'am', 'km', 'zh-CN', 'zh-TW',
+  'zh-HK', 'ja', 'ko',
+];
 
 let cachedYtDlp = null;
 let latestJobId = null;
@@ -389,6 +400,8 @@ const handleFormats = async (request, response, url) => {
       '--dump-single-json',
       '--no-playlist',
       '--no-warnings',
+      '--extractor-args',
+      `youtube:lang=${YOUTUBE_AUDIO_LANGUAGE_CODES.join(',')}`,
       pageUrl,
     ]);
     const info = JSON.parse(stdout);

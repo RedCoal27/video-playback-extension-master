@@ -48,6 +48,9 @@ type DownloadOption = {
   source?: 'direct' | 'companion';
   formatId?: string;
   pageUrl?: string;
+  audioTracks?: AudioTrack[];
+  includesAllAudioTracks?: boolean;
+  mergeOutputFormat?: 'mp4' | 'mkv';
 };
 
 type DownloadJob = {
@@ -56,6 +59,14 @@ type DownloadJob = {
   status: string;
   percent: number;
   message: string;
+};
+
+type AudioTrack = {
+  formatId: string;
+  label: string;
+  language: string;
+  ext: string;
+  bitrate: number;
 };
 
 const YTDLP_HELPER_URL = 'http://127.0.0.1:47829';
@@ -113,6 +124,7 @@ const requestYouTubeDownload = async (option: DownloadOption) => {
       url: option.pageUrl,
       formatId: option.formatId,
       label: option.label,
+      mergeOutputFormat: option.mergeOutputFormat,
     }),
   });
   const data = await response.json().catch(() => null);
@@ -455,27 +467,6 @@ const Popup: React.FC = () => {
     sendMediaAttributeData({}, true);
   };
 
-  const handleOpenDownloadWindowClick = async () => {
-    const tabs: any = await getTabsPromise(Tabs.Current);
-    const tab = tabs?.[0];
-    const params = new URLSearchParams({
-      tabId: String(tab?.id || ''),
-      pageUrl: tab?.url || '',
-    });
-    const left = Math.max(0, window.screen.availWidth - 450);
-    const top = 24;
-
-    chrome.windows.create({
-      url: chrome.runtime.getURL(`download.html?${params.toString()}`),
-      type: 'popup',
-      width: 430,
-      height: 720,
-      left,
-      top,
-    });
-    window.close();
-  };
-
   const handleDownloadButtonClick = async () => {
     setDownloadError('');
     setDownloadOptions([]);
@@ -729,10 +720,10 @@ const Popup: React.FC = () => {
               <button
                 className="u-padding-5 u-margin-top-15"
                 type="button"
-                onClick={handleOpenDownloadWindowClick}
+                onClick={handleDownloadButtonClick}
                 disabled={isLoadingDownloadOptions}
               >
-                Download Media
+                {isLoadingDownloadOptions ? 'Loading...' : 'Download Media'}
               </button>
             </div>
 
@@ -768,8 +759,31 @@ const Popup: React.FC = () => {
                     onClick={() => handleDownloadOptionClick(option)}
                   >
                     <span>{option.label}</span>
-                    <small>{option.detail}</small>
+                    <small>
+                      {option.detail}
+                      {option.includesAllAudioTracks
+                        ? ' - all audio languages'
+                        : ''}
+                    </small>
                   </button>
+                ))}
+              </div>
+            )}
+
+            {!!downloadOptions.some((option) => option.audioTracks?.length) && (
+              <div className="App-audio-tracks u-margin-top-15">
+                <strong>Audio Tracks</strong>
+                {(
+                  downloadOptions.find((option) => option.audioTracks?.length)
+                    ?.audioTracks || []
+                ).map((track) => (
+                  <div
+                    className="App-audio-track"
+                    key={`${track.formatId}-${track.language}`}
+                  >
+                    <span>{track.label}</span>
+                    <small>{track.language}</small>
+                  </div>
                 ))}
               </div>
             )}
@@ -779,7 +793,7 @@ const Popup: React.FC = () => {
                 <summary>Shortcuts</summary>
                 {Object.keys(shortcuts).map((shortcut, i) => (
                   <div
-                    className="u-flex u-jc-space-between"
+                    className="App-shortcut-row"
                     key={`${shortcut}-${i}`}
                   >
                     <label className="App-shortcut-label" htmlFor={shortcut}>

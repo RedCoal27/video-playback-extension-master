@@ -1,7 +1,7 @@
 .App {
   box-sizing: border-box;
   text-align: center;
-  width: 300px;
+  width: 320px;
   padding: 12px;
   background-color: #282c34;
 }
@@ -49,16 +49,31 @@
   max-height: 200px;
   overflow-y: auto;
   width: 100%;
+  box-sizing: border-box;
+  padding-right: 2px;
+}
+
+.App-shortcut-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
 }
 
 .App-shortcut-label {
   font-size: 14px;
   padding: 5px;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .App-shortcut-input {
-  width: 10px;
+  width: 30px;
   padding: 5px;
+  text-align: center;
 }
 
 .App-player-controls {
@@ -112,7 +127,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 170px;
+  max-height: 150px;
   overflow-y: auto;
 }
 
@@ -132,6 +147,40 @@
 .App-download-option small {
   margin-top: 2px;
   opacity: 0.75;
+}
+
+.App-audio-tracks {
+  padding: 8px;
+  border: 1px solid #4a5160;
+  border-radius: 6px;
+  background: #20242c;
+  text-align: left;
+}
+
+.App-audio-tracks strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+.App-audio-track {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.App-audio-track span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.App-audio-track small {
+  flex: 0 0 auto;
+  color: #d3d8e3;
 }
 
 .App-slider-row {
