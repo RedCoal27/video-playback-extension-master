@@ -1,0 +1,77 @@
+{
+  "name": "Video Playback Extension",
+  "version": "1.0.6",
+  "description": "A full-featured video and audio player extension. Control playback speed, skipping, rewinding and more.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon34.png"
+  },
+  "icons": {
+    "34": "icon34.png",
+    "128": "icon128.png"
+  },
+  "content_scripts": [
+    {
+      "all_frames": false,
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "run_at": "document_idle",
+      "js": [
+        "contentScript.bundle.js"
+      ],
+      "css": [
+        "content.styles.css"
+      ]
+    }
+  ],
+  "background": {
+    "service_worker": "background.bundle.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "netflix.bundle.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
+  "manifest_version": 3,
+  "permissions": [
+    "storage",
+    "downloads"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "commands": {
+    "decrease-playback-rate": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+1"
+      },
+      "description": "Decrease Playback Rate By .25"
+    },
+    "increase-playback-rate": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+2"
+      },
+      "description": "Increase Playback Rate By .25"
+    },
+    "skip-forward": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Right"
+      },
+      "description": "Skip Forward By Set Skip Interval"
+    },
+    "skip-backward": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+Left"
+      },
+      "description": "Skip Backward By Set Skip Interval"
+    }
+  }
+}

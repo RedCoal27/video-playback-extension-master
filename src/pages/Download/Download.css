@@ -1,0 +1,180 @@
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: #282c34;
+  color: #ffffff;
+  font-family: Segoe UI, Arial, sans-serif;
+}
+
+button {
+  box-sizing: border-box;
+  max-width: 100%;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.Download {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 16px;
+}
+
+.Download-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.Download-title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.25;
+}
+
+.Download-subtitle {
+  display: block;
+  margin-top: 4px;
+  color: #c8cfdb;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.Download-refresh {
+  padding: 6px 10px;
+}
+
+.Download-section {
+  margin-top: 18px;
+}
+
+.Download-section-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: #d9deea;
+  text-align: left;
+}
+
+.Download-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.Download-option {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #4a5160;
+  border-radius: 6px;
+  background: #20242c;
+  color: #ffffff;
+  text-align: left;
+}
+
+.Download-option strong,
+.Download-option small {
+  display: block;
+}
+
+.Download-option small {
+  margin-top: 4px;
+  color: #c8cfdb;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.Download-audio-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.Download-audio-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid #4a5160;
+  border-radius: 6px;
+  background: #20242c;
+  font-size: 13px;
+}
+
+.Download-audio-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.Download-audio-item small {
+  flex: 0 0 auto;
+  color: #c8cfdb;
+}
+
+.Download-status {
+  padding: 10px;
+  border: 1px solid #4a5160;
+  border-radius: 6px;
+  background: #20242c;
+  text-align: left;
+}
+
+.Download-status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.Download-status-row strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.Download-status progress {
+  display: block;
+  width: 100%;
+  height: 12px;
+  margin: 8px 0;
+}
+
+.Download-status small {
+  display: block;
+  color: #c8cfdb;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.Download-error {
+  padding: 10px;
+  border: 1px solid #7a3a31;
+  border-radius: 6px;
+  background: #3a2728;
+  color: #ffb4a8;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.Download-note {
+  color: #c8cfdb;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: left;
+}

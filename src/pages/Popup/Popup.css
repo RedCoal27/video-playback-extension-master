@@ -1,0 +1,208 @@
+.App {
+  box-sizing: border-box;
+  text-align: center;
+  width: 300px;
+  padding: 12px;
+  background-color: #282c34;
+}
+
+.App-logo {
+  height: 52px;
+  pointer-events: none;
+  margin-right: 10px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .App-logo {
+    animation: App-logo-spin infinite 60s linear;
+  }
+}
+
+.App-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 14px;
+  color: white;
+}
+
+.App-donate-image {
+  height: 25px;
+}
+
+.App-title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.App-container {
+  color: white;
+  font-size: 15px;
+  overflow: hidden;
+}
+
+.App-shortcut-details {
+  max-height: 200px;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.App-shortcut-label {
+  font-size: 14px;
+  padding: 5px;
+}
+
+.App-shortcut-input {
+  width: 10px;
+  padding: 5px;
+}
+
+.App-player-controls {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.App-download-error {
+  color: #ffb4a8;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.App-download-status {
+  padding: 8px;
+  border: 1px solid #4a5160;
+  border-radius: 6px;
+  text-align: left;
+  font-size: 13px;
+  line-height: 1.35;
+  background: #20242c;
+}
+
+.App-download-status strong,
+.App-download-status span,
+.App-download-status small {
+  min-width: 0;
+}
+
+.App-download-status strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.App-download-status progress {
+  display: block;
+  width: 100%;
+  height: 10px;
+  margin: 6px 0;
+}
+
+.App-download-status small {
+  display: block;
+  color: #d3d8e3;
+  overflow-wrap: anywhere;
+}
+
+.App-download-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 170px;
+  overflow-y: auto;
+}
+
+.App-download-option {
+  width: 100%;
+  margin: 0;
+  padding: 7px 8px;
+  text-align: left;
+  white-space: normal;
+}
+
+.App-download-option span,
+.App-download-option small {
+  display: block;
+}
+
+.App-download-option small {
+  margin-top: 2px;
+  opacity: 0.75;
+}
+
+.App-slider-row {
+  margin-top: 15px;
+  text-align: left;
+}
+
+.App-slider-row input[type='range'] {
+  display: block;
+  width: 100%;
+}
+
+.App-slider-value {
+  flex: 0 0 54px;
+  padding: 5px;
+  text-align: right;
+}
+
+select,
+input,
+button {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+select {
+  width: 112px;
+}
+
+button {
+  margin: 0 2px;
+  white-space: nowrap;
+}
+
+.u-flex {
+  display: flex;
+}
+
+.u-flex-direction-column {
+  flex-direction: column;
+}
+
+.u-jc-space-between {
+  justify-content: space-between;
+}
+
+.u-jc-space-evenly {
+  justify-content: space-evenly;
+}
+
+.u-ai-center {
+  align-items: center;
+}
+
+.u-padding-5 {
+  padding: 5px;
+}
+
+.u-margin-top-15 {
+  margin-top: 15px;
+}
+
+.u-text-align-left {
+  text-align: left;
+}
+
+@keyframes App-logo-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

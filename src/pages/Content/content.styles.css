@@ -1,0 +1,32 @@
+.MessageBannerContainer {
+  z-index: 99999;
+  position: fixed;
+  right: 0;
+  top: 0;
+  list-style: none;
+  visibility: visible !important;
+}
+
+.MessageBanner {
+  background-color: #080808;
+  opacity: 0.75;
+  color: #f0f0f0;
+  font-size: 18px;
+  visibility: visible !important;
+}
+
+.TheaterModeVideo {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  transform: translate(-50%, -50%) !important;
+  z-index: 9999 !important;
+  visibility: visible !important;
+  width: 95% !important;
+  height: 95% !important;
+  opacity: 1 !important;
+}
+
+.TheaterModeBodyElement {
+  visibility: hidden;
+}
