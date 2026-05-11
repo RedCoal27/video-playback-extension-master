@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const fs = require('fs');
 const { spawn, spawnSync } = require('child_process');
 const os = require('os');
@@ -7,6 +8,7 @@ const path = require('path');
 const PORT = Number(process.env.YTDLP_SERVER_PORT || 47829);
 const HOST = '127.0.0.1';
 const DOWNLOAD_DIR = process.env.YTDLP_DOWNLOAD_DIR || path.join(os.homedir(), 'Downloads');
+const TEMP_DOWNLOAD_DIR = path.join(DOWNLOAD_DIR, '.video-playback-temp');
 const LOCAL_YTDLP = path.join(__dirname, '..', 'tools', 'yt-dlp.exe');
 const LOCAL_FFMPEG_DIR = path.join(__dirname, '..', 'tools', 'ffmpeg', 'bin');
 const LOCAL_FFMPEG = path.join(LOCAL_FFMPEG_DIR, 'ffmpeg.exe');
@@ -196,6 +198,7 @@ const parseYtDlpLine = (line) => {
   }
 
   const percentMatch = line.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
+  const fragmentMatch = line.match(/\bfragment\s+(\d+)\s+of\s+(\d+)\b/i);
   const speedMatch = line.match(/\bat\s+([^\s]+\/s)/i);
   const aria2SpeedMatch = line.match(/\bDL:([^\]\s]+)/i);
   const aria2SizeMatch = line.match(/\((\d+)%\)/);
@@ -203,9 +206,44 @@ const parseYtDlpLine = (line) => {
     /\[(?:download|Merger)\]\s+(?:Destination:|Merging formats into)\s+"?(.+?)"?$/
   );
 
-  if (destinationMatch) {
+  if (
+    line.includes('[Merger]') ||
+    line.includes('[ffmpeg]') ||
+    /fixing|merging|post-process|postprocess|converting|remuxing/i.test(line)
+  ) {
     return {
-      label: path.basename(destinationMatch[1]),
+      status: 'processing',
+      percent: 100,
+      speed: '',
+      message: 'Traitement du fichier final...',
+    };
+  }
+
+  if (destinationMatch) {
+    const destinationName = path.basename(destinationMatch[1]);
+
+    if (/\.part-Frag\d+$/i.test(destinationName)) {
+      return {
+        message: normalizedLine,
+      };
+    }
+
+    return {
+      label: destinationName,
+      message: normalizedLine,
+    };
+  }
+
+  if (fragmentMatch) {
+    const current = Number(fragmentMatch[1]);
+    const total = Number(fragmentMatch[2]);
+    const percent =
+      total > 0 ? Math.min(99, Math.max(0, (current / total) * 100)) : 0;
+
+    return {
+      status: 'downloading',
+      percent,
+      speed: speedMatch ? speedMatch[1] : '',
       message: normalizedLine,
     };
   }
@@ -222,17 +260,7 @@ const parseYtDlpLine = (line) => {
   if (aria2SpeedMatch || aria2SizeMatch) {
     return {
       status: 'downloading',
-      ...(aria2SizeMatch ? { percent: Number(aria2SizeMatch[1]) } : {}),
       speed: aria2SpeedMatch ? aria2SpeedMatch[1] : '',
-      message: normalizedLine,
-    };
-  }
-
-  if (line.includes('[Merger]') || line.includes('[ffmpeg]')) {
-    return {
-      status: 'processing',
-      percent: 100,
-      speed: '',
       message: normalizedLine,
     };
   }
@@ -400,10 +428,13 @@ const cleanupAria2Artifacts = (job) => {
 const cleanupStaleAria2ControlFiles = () => {
   try {
     for (const filename of fs.readdirSync(DOWNLOAD_DIR)) {
-      if (filename.endsWith('.aria2')) {
+      if (filename.endsWith('.aria2') || /\.part-Frag\d+$/i.test(filename)) {
         fs.rmSync(path.join(DOWNLOAD_DIR, filename), { force: true });
       }
     }
+
+    fs.rmSync(TEMP_DOWNLOAD_DIR, { recursive: true, force: true });
+    fs.mkdirSync(TEMP_DOWNLOAD_DIR, { recursive: true });
   } catch (error) {
     // Best-effort cleanup only.
   }
@@ -491,6 +522,86 @@ const formatBytes = (value) => {
   return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
 };
 
+const getProbeSize = (targetUrl, referer = '', method = 'HEAD', redirectCount = 0) =>
+  new Promise((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error('Too many redirects while probing media size.'));
+      return;
+    }
+
+    let parsedUrl;
+
+    try {
+      parsedUrl = new URL(targetUrl);
+    } catch (error) {
+      reject(new Error('Invalid media URL.'));
+      return;
+    }
+
+    const transport = parsedUrl.protocol === 'https:' ? https : http;
+    const request = transport.request(
+      parsedUrl,
+      {
+        method,
+        headers: {
+          'User-Agent': DEFAULT_USER_AGENT,
+          Accept: '*/*',
+          ...(method === 'GET' ? { Range: 'bytes=0-0' } : {}),
+          ...(referer ? { Referer: referer } : {}),
+        },
+      },
+      (response) => {
+        const location = response.headers.location;
+
+        if (
+          response.statusCode >= 300 &&
+          response.statusCode < 400 &&
+          location
+        ) {
+          response.resume();
+          getProbeSize(new URL(location, parsedUrl).href, referer, method, redirectCount + 1)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+
+        const contentRange = response.headers['content-range'];
+        const rangeMatch =
+          typeof contentRange === 'string'
+            ? contentRange.match(/\/(\d+)$/)
+            : null;
+        const contentLength = response.headers['content-length'];
+        const size = rangeMatch
+          ? Number(rangeMatch[1])
+          : contentLength
+            ? Number(contentLength)
+            : 0;
+
+        response.resume();
+
+        if (Number.isFinite(size) && size > 0) {
+          resolve(size);
+          return;
+        }
+
+        if (method === 'HEAD') {
+          getProbeSize(targetUrl, referer, 'GET', redirectCount)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+
+        resolve(0);
+      }
+    );
+
+    request.setTimeout(7000, () => {
+      request.destroy(new Error('Media size probe timed out.'));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+
 const formatDetail = (parts) => parts.filter(Boolean).join(' - ');
 
 const getHeaderArgs = (referer) => {
@@ -526,7 +637,8 @@ const getDownloadSpeedArgs = (formatId, useExternalDownloader = true) => {
     args.push('--concurrent-fragments', '8');
   }
 
-  const aria2c = useExternalDownloader ? findAria2c() : '';
+  const shouldUseAria2c = useExternalDownloader && formatId === 'direct';
+  const aria2c = shouldUseAria2c ? findAria2c() : '';
 
   if (aria2c) {
     args.push(
@@ -618,6 +730,7 @@ const buildOptions = (info, pageUrl) => {
           (format.ext || '').toUpperCase(),
           formatBytes(format.filesize || format.filesize_approx),
         ]),
+        sizeBytes: format.filesize || format.filesize_approx || undefined,
         audioTracks,
         includesAllAudioTracks: false,
       });
@@ -690,9 +803,10 @@ const getAudioTracks = (formats) => {
 
 const handleFormats = async (request, response, url) => {
   const pageUrl = url.searchParams.get('url');
+  const referer = url.searchParams.get('referer') || '';
 
   if (!pageUrl) {
-    sendJson(response, 400, { ok: false, error: 'Missing YouTube URL.' });
+    sendJson(response, 400, { ok: false, error: 'Missing page URL.' });
     return;
   }
 
@@ -701,6 +815,7 @@ const handleFormats = async (request, response, url) => {
       '--dump-single-json',
       '--no-playlist',
       '--no-warnings',
+      ...getHeaderArgs(referer),
       '--extractor-args',
       `youtube:lang=${YOUTUBE_AUDIO_LANGUAGE_CODES.join(',')}`,
       pageUrl,
@@ -716,7 +831,7 @@ const handleFormats = async (request, response, url) => {
   } catch (error) {
     sendJson(response, 500, {
       ok: false,
-      error: error instanceof Error ? error.message : 'Failed to read YouTube formats.',
+      error: error instanceof Error ? error.message : 'Failed to read media formats.',
     });
   }
 };
@@ -754,8 +869,10 @@ const handleDownload = async (request, response) => {
         : []),
       ...(shouldSelectFormat ? ['-f', formatId] : []),
       ...(shouldSelectFormat ? ['--merge-output-format', mergeOutputFormat] : []),
-      '-P',
-      DOWNLOAD_DIR,
+      '--paths',
+      `home:${DOWNLOAD_DIR}`,
+      '--paths',
+      `temp:${TEMP_DOWNLOAD_DIR}`,
       '-o',
       requestedFilename || '%(title).200B [%(id)s].%(ext)s',
       pageUrl,
@@ -772,6 +889,30 @@ const handleDownload = async (request, response) => {
     sendJson(response, 500, {
       ok: false,
       error: error instanceof Error ? error.message : 'Failed to start download.',
+    });
+  }
+};
+
+const handleProbe = async (request, response, url) => {
+  const mediaUrl = url.searchParams.get('url');
+  const referer = url.searchParams.get('referer') || '';
+
+  if (!mediaUrl) {
+    sendJson(response, 400, { ok: false, error: 'Missing media URL.' });
+    return;
+  }
+
+  try {
+    const sizeBytes = await getProbeSize(mediaUrl, referer);
+
+    sendJson(response, 200, {
+      ok: true,
+      sizeBytes,
+    });
+  } catch (error) {
+    sendJson(response, 200, {
+      ok: true,
+      sizeBytes: 0,
     });
   }
 };
@@ -859,6 +1000,11 @@ const server = http.createServer((request, response) => {
 
   if (request.method === 'GET' && url.pathname === '/formats') {
     handleFormats(request, response, url);
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/probe') {
+    handleProbe(request, response, url);
     return;
   }
 

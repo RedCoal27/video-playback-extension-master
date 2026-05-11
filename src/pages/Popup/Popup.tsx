@@ -45,6 +45,7 @@ type DownloadOption = {
   detail: string;
   url?: string;
   filename?: string;
+  sizeBytes?: number;
   source?: 'direct' | 'companion';
   formatId?: string;
   pageUrl?: string;
@@ -81,6 +82,22 @@ const clamp = (value: number, min: number, max: number) =>
 const formatPlaybackRate = (value: number) =>
   value.toFixed(2).replace(/\.?0+$/, '');
 
+const formatBytes = (value?: number) => {
+  if (!value) {
+    return '';
+  }
+
+  const mb = value / (1024 * 1024);
+
+  if (mb < 1024) {
+    return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
+  }
+
+  const gb = mb / 1024;
+
+  return `${gb.toFixed(gb >= 10 ? 1 : 2)} GB`;
+};
+
 const isYouTubeUrl = (value?: string) => {
   if (!value) {
     return false;
@@ -110,13 +127,20 @@ const createTimeoutSignal = (timeoutMs: number) => {
   return { controller, timeoutId };
 };
 
-const requestYouTubeOptions = async (
+const requestCompanionOptions = async (
   pageUrl: string,
+  referer = '',
   timeoutMs = HELPER_FORMAT_TIMEOUT_MS
 ) => {
   const { controller, timeoutId } = createTimeoutSignal(timeoutMs);
+  const params = new URLSearchParams({ url: pageUrl });
+
+  if (referer) {
+    params.set('referer', referer);
+  }
+
   const response = await fetch(
-    `${YTDLP_HELPER_URL}/formats?url=${encodeURIComponent(pageUrl)}`,
+    `${YTDLP_HELPER_URL}/formats?${params}`,
     { signal: controller.signal }
   ).finally(() => window.clearTimeout(timeoutId));
   const data = await response.json().catch(() => null);
@@ -128,6 +152,31 @@ const requestYouTubeOptions = async (
   }
 
   return data.options || [];
+};
+
+const isCompanionInspectionOption = (option: DownloadOption) =>
+  option.source === 'companion' &&
+  option.pageUrl &&
+  option.formatId !== 'direct' &&
+  /^html5-(page|blob)-helper$/.test(option.id);
+
+const resolveCompanionInspectionOptions = async (
+  options: DownloadOption[],
+  timeoutMs = HELPER_FORMAT_TIMEOUT_MS
+) => {
+  const inspectionOption = options.find(isCompanionInspectionOption);
+
+  if (!inspectionOption?.pageUrl) {
+    return options;
+  }
+
+  const companionOptions = await requestCompanionOptions(
+    inspectionOption.pageUrl,
+    inspectionOption.referer,
+    timeoutMs
+  );
+
+  return companionOptions.length ? companionOptions : options;
 };
 
 const requestPageDownloadOptions = (tabID: number): Promise<DownloadOption[]> =>
@@ -160,6 +209,55 @@ const requestPageDownloadOptions = (tabID: number): Promise<DownloadOption[]> =>
       }
     );
   });
+
+const requestMediaSize = async (option: DownloadOption) => {
+  if (option.sizeBytes) {
+    return option.sizeBytes;
+  }
+
+  const mediaUrl = option.pageUrl || option.url;
+
+  if (!mediaUrl) {
+    return 0;
+  }
+
+  const params = new URLSearchParams({
+    url: mediaUrl,
+  });
+
+  if (option.referer) {
+    params.set('referer', option.referer);
+  }
+
+  const response = await fetch(`${YTDLP_HELPER_URL}/probe?${params}`);
+  const data = await response.json().catch(() => null);
+
+  return response.ok && data?.ok ? Number(data.sizeBytes || 0) : 0;
+};
+
+const enrichDownloadOptions = async (options: DownloadOption[]) => {
+  const enrichedOptions = await Promise.all(
+    options.map(async (option) => {
+      const shouldProbe =
+        !option.sizeBytes &&
+        (option.formatId === 'direct' || option.url);
+
+      if (!shouldProbe) {
+        return option;
+      }
+
+      try {
+        const sizeBytes = await requestMediaSize(option);
+
+        return sizeBytes ? { ...option, sizeBytes } : option;
+      } catch (error) {
+        return option;
+      }
+    })
+  );
+
+  return enrichedOptions;
+};
 
 const requestYouTubeDownload = async (option: DownloadOption) => {
   const response = await fetch(`${YTDLP_HELPER_URL}/download`, {
@@ -527,13 +625,14 @@ const Popup: React.FC = () => {
 
       if (isYouTubeUrl(tab.url)) {
         try {
-          const options = await requestYouTubeOptions(
+          const options = await requestCompanionOptions(
             tab.url,
+            '',
             YOUTUBE_FORMAT_TIMEOUT_MS
           );
 
           if (options.length) {
-            setDownloadOptions(options);
+            setDownloadOptions(await enrichDownloadOptions(options));
             setIsLoadingDownloadOptions(false);
             return;
           }
@@ -544,14 +643,20 @@ const Popup: React.FC = () => {
 
       try {
         const options = await requestPageDownloadOptions(tabID);
-        setDownloadOptions(options);
+        const resolvedOptions = await resolveCompanionInspectionOptions(
+          options,
+          YOUTUBE_FORMAT_TIMEOUT_MS
+        );
+
+        setDownloadOptions(await enrichDownloadOptions(resolvedOptions));
       } catch (pageError) {
         if (!tab.url) {
           throw pageError;
         }
 
-        const helperOptions = await requestYouTubeOptions(
+        const helperOptions = await requestCompanionOptions(
           tab.url,
+          '',
           HELPER_FORMAT_TIMEOUT_MS
         );
 
@@ -559,7 +664,7 @@ const Popup: React.FC = () => {
           throw pageError;
         }
 
-        setDownloadOptions(helperOptions);
+        setDownloadOptions(await enrichDownloadOptions(helperOptions));
       }
 
       setIsLoadingDownloadOptions(false);
@@ -576,6 +681,27 @@ const Popup: React.FC = () => {
   const handleDownloadOptionClick = async (option: DownloadOption) => {
     setDownloadError('');
     setIsStartingDownload(true);
+
+    if (isCompanionInspectionOption(option)) {
+      try {
+        const options = await requestCompanionOptions(
+          option.pageUrl || '',
+          option.referer,
+          YOUTUBE_FORMAT_TIMEOUT_MS
+        );
+
+        if (!options.length) {
+          throw new Error('Le compagnon n’a trouvé aucune qualité téléchargeable.');
+        }
+
+        setDownloadOptions(await enrichDownloadOptions(options));
+      } catch (error) {
+        setDownloadError(getHelperError(error));
+      } finally {
+        setIsStartingDownload(false);
+      }
+      return;
+    }
 
     if (option.source === 'companion') {
       try {
@@ -790,6 +916,32 @@ const Popup: React.FC = () => {
               </div>
             )}
 
+            {!!downloadOptions.length && (
+              <div className="App-download-options u-margin-top-15">
+                {downloadOptions.map((option) => (
+                  <button
+                    key={`${option.id}-${option.url || option.formatId}`}
+                    className="App-download-option"
+                    type="button"
+                    title={option.detail}
+                    disabled={isStartingDownload}
+                    onClick={() => handleDownloadOptionClick(option)}
+                  >
+                    <span>{option.label}</span>
+                    <small>
+                      {option.detail}
+                      {option.sizeBytes
+                        ? ` - ${formatBytes(option.sizeBytes)}`
+                        : ''}
+                      {option.includesAllAudioTracks
+                        ? ' - all audio languages'
+                        : ''}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            )}
+
             {!!downloadJobs.length && (
               <div className="App-download-status u-margin-top-15">
                 {downloadJobs.slice(0, 4).map((downloadJob) => (
@@ -807,29 +959,6 @@ const Popup: React.FC = () => {
                     />
                     <small>{downloadJob.message}</small>
                   </div>
-                ))}
-              </div>
-            )}
-
-            {!!downloadOptions.length && (
-              <div className="App-download-options u-margin-top-15">
-                {downloadOptions.map((option) => (
-                  <button
-                    key={`${option.id}-${option.url || option.formatId}`}
-                    className="App-download-option"
-                    type="button"
-                    title={option.detail}
-                    disabled={isStartingDownload}
-                    onClick={() => handleDownloadOptionClick(option)}
-                  >
-                    <span>{option.label}</span>
-                    <small>
-                      {option.detail}
-                      {option.includesAllAudioTracks
-                        ? ' - all audio languages'
-                        : ''}
-                    </small>
-                  </button>
                 ))}
               </div>
             )}

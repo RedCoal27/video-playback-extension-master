@@ -6,6 +6,7 @@ export type DownloadOption = {
   detail: string;
   url?: string;
   filename?: string;
+  sizeBytes?: number;
   source?: 'direct' | 'companion';
   formatId?: string;
   pageUrl?: string;

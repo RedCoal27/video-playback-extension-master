@@ -237,14 +237,10 @@ function Update-DownloadStatus {
 function Start-Helper {
   if (Test-HelperAlive) {
     Set-Status "Pret" ([System.Drawing.Color]::LightGreen)
-    $startButton.Enabled = $false
-    $stopButton.Enabled = $true
     return
   }
 
   if (-not (Ensure-Tools)) {
-    $startButton.Enabled = $true
-    $stopButton.Enabled = $false
     return
   }
 
@@ -263,12 +259,8 @@ function Start-Helper {
 
   if (Test-HelperAlive) {
     Set-Status "Pret" ([System.Drawing.Color]::LightGreen)
-    $startButton.Enabled = $false
-    $stopButton.Enabled = $true
   } else {
     Set-Status "Erreur au demarrage" ([System.Drawing.Color]::LightCoral)
-    $startButton.Enabled = $true
-    $stopButton.Enabled = $false
   }
 }
 
@@ -286,8 +278,6 @@ function Stop-Helper {
 
   $script:serverProcess = $null
   Set-Status "Arrete" ([System.Drawing.Color]::Gainsboro)
-  $startButton.Enabled = $true
-  $stopButton.Enabled = $false
 }
 
 function Place-BottomRight {
@@ -322,28 +312,11 @@ $statusLabel.AutoSize = $true
 $statusLabel.Location = New-Object System.Drawing.Point(18, 48)
 $form.Controls.Add($statusLabel)
 
-$startButton = New-Object System.Windows.Forms.Button
-$startButton.Text = 'Demarrer'
-$startButton.Width = 82
-$startButton.Height = 28
-$startButton.Location = New-Object System.Drawing.Point(18, 86)
-$startButton.Add_Click({ Start-Helper })
-$form.Controls.Add($startButton)
-
-$stopButton = New-Object System.Windows.Forms.Button
-$stopButton.Text = 'Arreter'
-$stopButton.Width = 82
-$stopButton.Height = 28
-$stopButton.Location = New-Object System.Drawing.Point(108, 86)
-$stopButton.Enabled = $false
-$stopButton.Add_Click({ Stop-Helper })
-$form.Controls.Add($stopButton)
-
 $stopSelectedButton = New-Object System.Windows.Forms.Button
 $stopSelectedButton.Text = 'Arreter DL'
 $stopSelectedButton.Width = 82
 $stopSelectedButton.Height = 28
-$stopSelectedButton.Location = New-Object System.Drawing.Point(198, 86)
+$stopSelectedButton.Location = New-Object System.Drawing.Point(18, 86)
 $stopSelectedButton.Enabled = $false
 $stopSelectedButton.Add_Click({ Stop-SelectedJob })
 $form.Controls.Add($stopSelectedButton)
@@ -352,7 +325,7 @@ $downloadsButton = New-Object System.Windows.Forms.Button
 $downloadsButton.Text = 'Downloads'
 $downloadsButton.Width = 82
 $downloadsButton.Height = 28
-$downloadsButton.Location = New-Object System.Drawing.Point(288, 86)
+$downloadsButton.Location = New-Object System.Drawing.Point(108, 86)
 $downloadsButton.Add_Click({ Start-Process $downloads })
 $form.Controls.Add($downloadsButton)
 
@@ -400,11 +373,6 @@ $showItem.Add_Click({
 })
 $openDownloadsItem = $contextMenu.Items.Add('Ouvrir les telechargements')
 $openDownloadsItem.Add_Click({ Start-Process $downloads })
-$contextMenu.Items.Add('-') | Out-Null
-$startItem = $contextMenu.Items.Add('Demarrer')
-$startItem.Add_Click({ Start-Helper })
-$stopItem = $contextMenu.Items.Add('Arreter')
-$stopItem.Add_Click({ Stop-Helper })
 $contextMenu.Items.Add('-') | Out-Null
 $exitItem = $contextMenu.Items.Add('Quitter')
 $exitItem.Add_Click({
