@@ -1,126 +1,139 @@
-# <img src="src/assets/img/icon128.png" width="64"/> Video Playback Extension
+# Video Playback + Volume + Download
 
-A full-featured video and audio player extension. Control playback speed, skipping, rewinding and more.
+A Chrome/Brave extension for controlling HTML5 video playback, boosting volume, and downloading media through a small local Windows companion app.
 
-<img src="web-store-images/disneyplus1280x800.png" width="500"/>
+This project is based on the original [Video Playback Extension](https://github.com/sunnyw1212/video-playback-extension). It keeps the original idea of a lightweight popup for media controls, then extends it with persistent settings, a volume booster, a more direct speed control, and companion-powered downloads for sites where browser downloads are not enough.
+
+## Credits
+
+Built from and inspired by:
+
+- [sunnyw1212/video-playback-extension](https://github.com/sunnyw1212/video-playback-extension)
+- [Video Playback Extension on the Chrome Web Store](https://chromewebstore.google.com/detail/video-playback-extension/dilncfnkialpgbnpcjmghnepnankdibk)
+- [chrome-extension-boilerplate-react](https://github.com/lxieyang/chrome-extension-boilerplate-react)
+
+The download companion uses local binaries from:
+
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
+- [FFmpeg](https://github.com/FFmpeg/FFmpeg)
+- [aria2](https://github.com/aria2/aria2)
 
 ## Features
 
-Speed up, slow down, advance and rewind HTML5 audio/video elements either with shortcuts or using a clean, elegant interface.
+- Control playback speed from the popup.
+- Boost video/audio volume above 100%.
+- Apply controls to the current tab or every open tab.
+- Keep the last configured settings and reuse them on future videos.
+- Play, pause, restart, loop, skip forward/backward, and theater mode.
+- Configurable keyboard shortcuts.
+- Detect downloadable HTML5 media and common streaming sources.
+- Show available download formats/qualities before starting a download.
+- Use a local companion app for advanced downloads, including streams and yt-dlp supported sites.
+- Track download progress from both the popup and the companion app.
+- Queue multiple downloads in the companion.
 
-Optimize your media experience by:
+## How It Works
 
-- controlling media on just your current active or across all tabs in Chrome
-- customizing playback speed
-- skipping forward or backward by custom time intervals
-- looping
-- restarting media from the very beginning
-- playing
-- pausing
-- an experimental Theater Mode (for video only)
-- customizable one key shortcuts for all actions
+The browser extension handles playback controls directly inside web pages.
 
-Once the extension is installed, navigate to any page with an HTML5 video or audio element and click on the extension to bring down the Player User Interface. Any changes made will affect all audio/video elements on the page and you can optionally control media across all tabs in Chrome using the Player UI.
+For downloads, simple media files can be passed to Chrome directly. More complex cases are sent to the local companion app, which runs on Windows and exposes a local server at:
 
-Default Shortcuts:
-
-- `s` = Decrease playback speed by .25
-- `w` = Increase playback speed by .25
-- `l` = Loop
-- `o` = Pause
-- `p` = Play
-- `e` = Reset playback speed
-- `r` = Restart
-- `a`= Skip backward by the Skip Interval set in the Player UI
-- `d` = Skip forward by the Skip Interval set in the Player UI
-- `t` = Theater Mode
-
-## Local Development
-
-### Installing and Running Procedures:
-
-1. Check if your [Node.js](https://nodejs.org/) version is >= **14**.
-2. Clone this repository.
-3. Run `npm install` to install the dependencies.
-4. Run `npm start`
-5. Load your extension on Chrome following:
-   1. Access `chrome://extensions/`
-   2. Check `Developer mode`
-   3. Click on `Load unpacked extension`
-   4. Select the `build` folder.
-6. Happy hacking.
-
-## Structure
-
-All your extension's code must be placed in the `src` folder.
-
-## Webpack auto-reload and HRM
-
-To make your workflow much more efficient this boilerplate uses the [webpack server](https://webpack.github.io/docs/webpack-dev-server.html) to development (started with `npm start`) with auto reload feature that reloads the browser automatically every time that you save some file in your editor.
-
-You can run the dev mode on other port if you want. Just specify the env var `port` like this:
-
-```
-$ PORT=6002 npm run start
+```text
+http://127.0.0.1:47829
 ```
 
-## Content Scripts
+The companion uses yt-dlp, FFmpeg, and aria2 to inspect media formats, download streams, merge audio/video when needed, and save the final file to the Windows Downloads folder.
 
-Although this boilerplate uses the webpack dev server, it's also prepared to write all your bundles files on the disk at every code change, so you can point, on your extension manifest, to your bundles that you want to use as [content scripts](https://developer.chrome.com/extensions/content_scripts), but you need to exclude these entry points from hot reloading [(why?)](https://github.com/samuelsimoes/chrome-extension-webpack-boilerplate/issues/4#issuecomment-261788690). To do so you need to expose which entry points are content scripts on the `webpack.config.js` using the `chromeExtensionBoilerplate -> notHotReload` config. Look the example below.
+## Installation
 
-Let's say that you want use the `myContentScript` entry point as content script, so on your `webpack.config.js` you will configure the entry point and exclude it from hot reloading, like this:
+Install dependencies and local tools:
 
-```js
-{
-  …
-  entry: {
-    myContentScript: "./src/js/myContentScript.js"
-  },
-  chromeExtensionBoilerplate: {
-    notHotReload: ["myContentScript"]
-  }
-  …
-}
+```powershell
+npm install
+npm run install:ytdlp
+npm run install:ffmpeg
+npm run install:aria2
+npm run build
 ```
 
-and on your `src/manifest.json`:
+Load the extension:
 
-```json
-{
-  "content_scripts": [
-    {
-      "matches": ["https://www.google.com/*"],
-      "js": ["myContentScript.bundle.js"]
-    }
-  ]
-}
+1. Open `chrome://extensions/`.
+2. Enable `Developer mode`.
+3. Click `Load unpacked`.
+4. Select the `build` folder.
+
+Start the companion by double-clicking:
+
+```text
+Video Playback Helper.vbs
 ```
 
-## Packing
+If that does not work, use:
 
-After the development of your extension run the command
-
-```
-$ NODE_ENV=production npm run build
+```text
+Video Playback Helper.cmd
 ```
 
-Now, the content of `build` folder will be the extension ready to be submitted to the Chrome Web Store. Just take a look at the [official guide](https://developer.chrome.com/webstore/publish) to more infos about publishing.
+## Usage
 
-To zip the extension:
+Open a page with a video, click the extension icon, then adjust playback speed, volume, loop, theater mode, or download options.
 
+For downloads, click `Download Media`. The popup will either show direct media choices or ask the companion to inspect the page and return the available formats.
+
+## Development
+
+Build the extension:
+
+```powershell
+npm run build
 ```
-$ zip ~/Desktop/videoplaybackextension.zip ./build -r
+
+Run the development server:
+
+```powershell
+npm start
 ```
 
-## Resources:
+Run only the companion server:
 
-- [Webpack documentation](https://webpack.js.org/concepts/)
-- [Chrome Extension documentation](https://developer.chrome.com/extensions/getstarted)
+```powershell
+npm run ytdlp-server
+```
 
-## Credits:
+Install or update local tools:
 
-Built on top of [https://github.com/lxieyang/chrome-extension-boilerplate-react](https://github.com/lxieyang/chrome-extension-boilerplate-react) by Michael Xieyang Liu
+```powershell
+npm run install:ytdlp
+npm run install:ffmpeg
+npm run install:aria2
+```
+
+Force-stop companion-related background processes:
+
+```powershell
+Get-Process node,aria2c,yt-dlp,ffmpeg -ErrorAction SilentlyContinue | Stop-Process -Force
+```
+
+## Project Structure
+
+- `src/pages/Popup`: extension popup UI.
+- `src/pages/Content`: page media detection and playback control.
+- `src/pages/Background`: Chrome background actions.
+- `utils/ytdlp-server.js`: local download server used by the companion.
+- `utils/helper-ui.ps1`: Windows companion interface.
+- `tools`: local yt-dlp, FFmpeg, and aria2 binaries.
+- `build`: compiled extension loaded into Chrome/Brave.
+
+## Limitations
+
+- DRM-protected media is not supported.
+- Some sites block downloads or change their media system often.
+- Stream progress can be approximate, especially for live or fragmented media.
+- YouTube and other platforms depend on yt-dlp support.
 
 ## License
 
-(MIT License) - Copyright (c) 2021 Sunny Wong
+MIT.
+
+Original Video Playback Extension copyright (c) 2021 Sunny Wong.
