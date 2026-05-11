@@ -42,6 +42,56 @@ console.log('Video Playback Extension content script loaded');
 let isContentEnabled = false;
 let hasRuntimeMessageListener = false;
 
+type ActiveMediaAttributes = {
+  playbackRate?: number;
+  volume?: number;
+  shouldLoop?: boolean;
+  isInTheaterMode?: boolean;
+};
+
+let activeMediaAttributes: ActiveMediaAttributes = {};
+
+const clampPlaybackRate = (value: number) => Math.min(Math.max(value, 0.1), 16);
+
+const getCurrentPlaybackRate = (storedPlaybackRate: number | string | undefined) => {
+  const parsedPlaybackRate = Number(
+    activeMediaAttributes.playbackRate ?? storedPlaybackRate ?? 1
+  );
+
+  if (Number.isNaN(parsedPlaybackRate)) {
+    return 1;
+  }
+
+  return parsedPlaybackRate;
+};
+
+const applyTemporaryPlaybackRate = (playbackRate: number) => {
+  activeMediaAttributes.playbackRate = playbackRate;
+  setMediaPlaybackRate(playbackRate);
+};
+
+const changePlaybackRateBy = async (
+  delta: number,
+  storedPlaybackRate?: number | string
+) => {
+  let currentPlaybackRate = storedPlaybackRate;
+
+  if (typeof currentPlaybackRate === 'undefined') {
+    const data: any = await getDataFromSyncStoragePromise();
+    currentPlaybackRate = data.playbackRate;
+  }
+
+  applyTemporaryPlaybackRate(
+    clampPlaybackRate(getCurrentPlaybackRate(currentPlaybackRate) + delta)
+  );
+};
+
+const applyMediaAttributesToMedia = (media: HTMLMediaElement) => {
+  setMediaPlaybackRate(activeMediaAttributes.playbackRate, media);
+  setMediaVolume(activeMediaAttributes.volume, media);
+  setMediaLoop(activeMediaAttributes.shouldLoop, media);
+};
+
 const observer = new MutationObserver((mutations) => {
   for (let i = 0; i < mutations.length; i++) {
     const mutation = mutations[i];
@@ -49,9 +99,7 @@ const observer = new MutationObserver((mutations) => {
       const addedNode = mutation?.addedNodes[j];
 
       if (addedNode.nodeName === 'VIDEO' || addedNode.nodeName === 'AUDIO') {
-        setMediaPlaybackRate(undefined, addedNode as HTMLMediaElement);
-        setMediaVolume(undefined, addedNode as HTMLMediaElement);
-        setMediaLoop(undefined, addedNode as HTMLMediaElement);
+        applyMediaAttributesToMedia(addedNode as HTMLMediaElement);
       }
 
       // handle nested media
@@ -75,9 +123,7 @@ const observer = new MutationObserver((mutations) => {
         const nestedMedias = [...nestedVideos, ...nestedAudios];
         for (let k = 0; k < nestedMedias.length; k++) {
           const nestedMedia = nestedMedias[k];
-          setMediaPlaybackRate(undefined, nestedMedia);
-          setMediaVolume(undefined, nestedMedia);
-          setMediaLoop(undefined, nestedMedia);
+          applyMediaAttributesToMedia(nestedMedia);
         }
       }
     }
@@ -205,8 +251,12 @@ const handleRateChange = (e: Event) => {
 
 const handlePlayOrSeek = async (e: Event) => {
   const data: any = await getDataFromSyncStoragePromise();
-  (e.target as HTMLMediaElement).playbackRate = data.playbackRate ?? 1;
-  setMediaVolume(data.volume, e.target as HTMLMediaElement);
+  (e.target as HTMLMediaElement).playbackRate =
+    activeMediaAttributes.playbackRate ?? data.playbackRate ?? 1;
+  setMediaVolume(
+    activeMediaAttributes.volume ?? data.volume,
+    e.target as HTMLMediaElement
+  );
 };
 
 const isNetflix = () => {
@@ -298,18 +348,13 @@ const handleKeydown = async (e: KeyboardEvent) => {
 
     switch (shortcutMap[keyCode]) {
       case SHORTCUT_DECREASE_PLAYBACK_RATE:
-        const decreasedPlaybackRate = parseFloat(playbackRate) - 0.25;
-        chrome.storage.sync.set({ playbackRate: decreasedPlaybackRate });
-        setMediaPlaybackRate(decreasedPlaybackRate);
+        await changePlaybackRateBy(-0.25, playbackRate);
         break;
       case SHORTCUT_INCREASE_PLAYBACK_RATE:
-        const increasedPlaybackRate = parseFloat(playbackRate) + 0.25;
-        chrome.storage.sync.set({ playbackRate: increasedPlaybackRate });
-        setMediaPlaybackRate(increasedPlaybackRate);
+        await changePlaybackRateBy(0.25, playbackRate);
         break;
       case SHORTCUT_RESET_PLAYBACK_RATE:
-        chrome.storage.sync.set({ playbackRate: 1 });
-        setMediaPlaybackRate(1);
+        applyTemporaryPlaybackRate(1);
         break;
       case SHORTCUT_SKIP_FORWARD:
         const skipForwardInterval = parseFloat(skipInterval || 30);
@@ -390,13 +435,19 @@ const handleMessage = (
 ) => {
   if (message.type === GET_DOWNLOAD_OPTIONS) {
     getDownloadOptions()
-      .then((options) => sendResponse({ ok: true, options }))
-      .catch((error) =>
-        sendResponse({
-          ok: false,
-          error: error?.message || 'Failed to get download options.',
-        })
-      );
+      .then((options) => {
+        if (options.length) {
+          sendResponse({ ok: true, options });
+        }
+      })
+      .catch((error) => {
+        if (window.top === window) {
+          sendResponse({
+            ok: false,
+            error: error?.message || 'Failed to get download options.',
+          });
+        }
+      });
 
     return true;
   }
@@ -409,7 +460,16 @@ const handleMessage = (
       disableContentScript();
       break;
     case SET_PLAYBACK_RATE:
-      setMediaPlaybackRate(message.payload.targetRate);
+      applyTemporaryPlaybackRate(message.payload.targetRate);
+      break;
+    case SHORTCUT_DECREASE_PLAYBACK_RATE:
+      changePlaybackRateBy(-0.25);
+      break;
+    case SHORTCUT_INCREASE_PLAYBACK_RATE:
+      changePlaybackRateBy(0.25);
+      break;
+    case SHORTCUT_RESET_PLAYBACK_RATE:
+      applyTemporaryPlaybackRate(1);
       break;
     case SKIP_FORWARD:
       const skipForwardInterval = parseFloat(message.payload.skipInterval);
@@ -443,6 +503,12 @@ const handleMessage = (
       }
       break;
     case SET_MEDIA_ATTRIBUTES:
+      activeMediaAttributes = {
+        playbackRate: message.payload.targetRate,
+        volume: message.payload.volume,
+        shouldLoop: message.payload.shouldLoop,
+        isInTheaterMode: message.payload.isInTheaterMode,
+      };
       setMediaPlaybackRate(message.payload.targetRate);
       setMediaVolume(message.payload.volume);
       setMediaLoop(message.payload.shouldLoop);

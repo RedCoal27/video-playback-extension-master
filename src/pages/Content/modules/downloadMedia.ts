@@ -4,8 +4,12 @@ export type DownloadOption = {
   id: string;
   label: string;
   detail: string;
-  url: string;
-  filename: string;
+  url?: string;
+  filename?: string;
+  source?: 'direct' | 'companion';
+  formatId?: string;
+  pageUrl?: string;
+  mergeOutputFormat?: 'mp4' | 'mkv';
 };
 
 type YouTubePageFormat = {
@@ -45,6 +49,51 @@ const getExtensionFromUrl = (value: string): string | null => {
   }
 };
 
+const isStreamUrl = (value: string) =>
+  /\.(m3u8|mpd)(?:[?#]|$)/i.test(value) ||
+  /(?:hls|dash|manifest|playlist|master)(?:[/?#._-]|$)/i.test(value);
+
+const isDirectMediaUrl = (value: string) =>
+  /\.(mp4|webm|mkv|mov|m4v|mp3|m4a|aac|ogg|oga|wav|flac)(?:[?#]|$)/i.test(
+    value
+  );
+
+const getAbsoluteUrl = (value: string) => {
+  try {
+    return new URL(value, window.location.href).href;
+  } catch (error) {
+    return '';
+  }
+};
+
+const getStreamUrlsFromPage = () => {
+  const urls = new Set<string>();
+  const addUrl = (value?: string | null) => {
+    if (!value) {
+      return;
+    }
+
+    const absoluteUrl = getAbsoluteUrl(value);
+
+    if (absoluteUrl && isStreamUrl(absoluteUrl)) {
+      urls.add(absoluteUrl);
+    }
+  };
+
+  Array.from(document.querySelectorAll('video, audio, source')).forEach(
+    (element) => {
+      addUrl((element as HTMLMediaElement | HTMLSourceElement).src);
+      addUrl((element as HTMLMediaElement).currentSrc);
+    }
+  );
+
+  performance.getEntriesByType('resource').forEach((entry) => {
+    addUrl(entry.name);
+  });
+
+  return Array.from(urls);
+};
+
 const requestBrowserDownload = (url: string, filename: string) => {
   chrome.runtime.sendMessage({
     type: REQUEST_DOWNLOAD_URL,
@@ -53,6 +102,10 @@ const requestBrowserDownload = (url: string, filename: string) => {
 };
 
 export const downloadOption = (option: DownloadOption) => {
+  if (!option.url || !option.filename) {
+    return;
+  }
+
   requestBrowserDownload(option.url, option.filename);
 };
 
@@ -79,14 +132,49 @@ const getHtml5DownloadOptions = (): DownloadOption[] => {
 
   const mediaUrl = media.currentSrc || media.src;
 
-  if (!mediaUrl) {
-    throw new Error('No downloadable source found for this media.');
+  const streamUrls = getStreamUrlsFromPage();
+
+  if (streamUrls.length) {
+    return streamUrls.map((streamUrl, index) => ({
+      id: `html5-stream-${index}`,
+      label:
+        index === 0
+          ? 'Stream via compagnon'
+          : `Stream ${index + 1} via compagnon`,
+      detail: 'HLS/DASH stream - processed by companion',
+      source: 'companion',
+      formatId: 'bestvideo+bestaudio/best',
+      pageUrl: streamUrl,
+      mergeOutputFormat: 'mp4',
+    }));
   }
 
-  if (mediaUrl.startsWith('blob:')) {
-    throw new Error(
-      'This media uses a blob stream and cannot be downloaded directly.'
-    );
+  if (!mediaUrl) {
+    return [
+      {
+        id: 'html5-page-helper',
+        label: 'Try page with compagnon',
+        detail: 'No direct media URL found - companion will inspect the page',
+        source: 'companion',
+        formatId: 'bestvideo+bestaudio/best',
+        pageUrl: window.location.href,
+        mergeOutputFormat: 'mp4',
+      },
+    ];
+  }
+
+  if (mediaUrl.startsWith('blob:') || !isDirectMediaUrl(mediaUrl)) {
+    return [
+      {
+        id: 'html5-blob-helper',
+        label: 'Try page with compagnon',
+        detail: 'Stream/blob source - companion will inspect the page',
+        source: 'companion',
+        formatId: 'bestvideo+bestaudio/best',
+        pageUrl: window.location.href,
+        mergeOutputFormat: 'mp4',
+      },
+    ];
   }
 
   const extension = getExtensionFromUrl(mediaUrl) || 'mp4';
@@ -98,6 +186,7 @@ const getHtml5DownloadOptions = (): DownloadOption[] => {
       id: 'html5-current',
       label: 'Current HTML5 media',
       detail: `${extension.toUpperCase()} direct source`,
+      source: 'direct',
       url: mediaUrl,
       filename,
     },
@@ -251,6 +340,10 @@ const dedupeOptions = (options: DownloadOption[]) => {
   const seenUrls = new Set<string>();
 
   return options.filter((option) => {
+    if (!option.url) {
+      return true;
+    }
+
     if (seenUrls.has(option.url)) {
       return false;
     }

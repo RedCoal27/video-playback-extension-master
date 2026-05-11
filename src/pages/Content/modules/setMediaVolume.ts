@@ -7,6 +7,26 @@ type BoostedMedia = {
 
 const boostedMedias = new WeakMap<HTMLMediaElement, BoostedMedia>();
 
+const isSafeToBoostVolume = (media: HTMLMediaElement): boolean => {
+  const mediaUrl = media.currentSrc || media.src;
+
+  if (!mediaUrl) {
+    return false;
+  }
+
+  try {
+    const url = new URL(mediaUrl, window.location.href);
+
+    return (
+      url.protocol === 'blob:' ||
+      url.protocol === 'data:' ||
+      url.origin === window.location.origin
+    );
+  } catch (error) {
+    return false;
+  }
+};
+
 const normalizeVolume = (volume: number | string | undefined): number => {
   const parsedVolume = parseFloat(`${volume ?? 1}`);
 
@@ -57,6 +77,12 @@ const _setMediaVolume = (volume: number, media: HTMLMediaElement) => {
       boostedMedia.gainNode.gain.value = 1;
     }
 
+    return;
+  }
+
+  if (!isSafeToBoostVolume(media)) {
+    // Boosting cross-origin media through Web Audio can mute playback on some
+    // sites. Keep the browser's native maximum volume instead of risking silence.
     return;
   }
 

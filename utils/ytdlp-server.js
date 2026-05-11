@@ -342,6 +342,26 @@ const buildOptions = (info, pageUrl) => {
       });
     });
 
+  if (!options.length) {
+    const isLive = info.is_live || info.was_live;
+
+    options.push({
+      id: 'generic-best',
+      source: 'companion',
+      formatId: 'bestvideo+bestaudio/best',
+      pageUrl,
+      label: 'Best available',
+      detail: formatDetail([
+        isLive ? 'live/continuous stream' : 'media stream',
+        'processed by yt-dlp',
+        'MP4',
+      ]),
+      audioTracks,
+      includesAllAudioTracks: audioIds.length > 1,
+      mergeOutputFormat: audioIds.length > 1 ? 'mkv' : 'mp4',
+    });
+  }
+
   return options;
 };
 

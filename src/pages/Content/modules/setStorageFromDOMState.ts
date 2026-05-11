@@ -6,7 +6,6 @@ export const setStorageFromDOMState = (): void => {
   const hasVideoInTheaterMode = document.querySelector('.TheaterModeVideo');
 
   chrome.storage.sync.set({
-    playbackRate: media?.playbackRate || 1,
     shouldLoop: media?.loop || false,
     isInTheaterMode: hasVideoInTheaterMode,
   });

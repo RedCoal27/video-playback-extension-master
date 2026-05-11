@@ -96,7 +96,7 @@ const getHelperError = (error: unknown) => {
     return error.message;
   }
 
-  return 'YouTube helper unavailable. Start it with npm run ytdlp-server.';
+  return 'Compagnon indisponible. Lance Video Playback Helper.vbs.';
 };
 
 const requestYouTubeOptions = async (pageUrl: string) => {
@@ -107,7 +107,7 @@ const requestYouTubeOptions = async (pageUrl: string) => {
 
   if (!response.ok || !data?.ok) {
     throw new Error(
-      data?.error || 'YouTube helper unavailable. Start it with npm run ytdlp-server.'
+      data?.error || 'Compagnon indisponible. Lance Video Playback Helper.vbs.'
     );
   }
 
@@ -176,7 +176,8 @@ const Popup: React.FC = () => {
   const sendMediaAttributeData = useCallback(
     async (
       overrides: MediaAttributeOverrides = {},
-      closeAfterApply = false
+      closeAfterApply = false,
+      saveAsDefault = false
     ) => {
       const targetApplyTo = overrides.applyTo ?? applyTo;
       const targetRate = clamp(
@@ -188,13 +189,15 @@ const Popup: React.FC = () => {
       const targetShouldLoop = overrides.shouldLoop ?? shouldLoop;
       const targetTheaterMode = overrides.isInTheaterMode ?? isInTheaterMode;
 
-      chrome.storage.sync.set({
-        applyTo: targetApplyTo,
-        shouldLoop: targetShouldLoop,
-        isInTheaterMode: targetTheaterMode,
-        playbackRate: targetRate,
-        volume: targetVolume,
-      });
+      if (saveAsDefault) {
+        chrome.storage.sync.set({
+          applyTo: targetApplyTo,
+          shouldLoop: targetShouldLoop,
+          isInTheaterMode: targetTheaterMode,
+          playbackRate: targetRate,
+          volume: targetVolume,
+        });
+      }
 
       const isApplyingToAllTabs = targetApplyTo === Tabs.All;
       const tabs: any = await getTabsPromise(targetApplyTo as Tabs);
@@ -459,12 +462,13 @@ const Popup: React.FC = () => {
         isInTheaterMode: false,
         applyTo: Tabs.Current,
       },
-      false
+      false,
+      true
     );
   };
 
   const handleApplyToMediaButtonClick = () => {
-    sendMediaAttributeData({}, true);
+    sendMediaAttributeData({}, true, true);
   };
 
   const handleDownloadButtonClick = async () => {
@@ -482,12 +486,20 @@ const Popup: React.FC = () => {
         throw new Error('No active tab found.');
       }
 
-      if (isYouTubeUrl(tab.url)) {
-        const options = await requestYouTubeOptions(tab.url);
+      if (tab.url) {
+        try {
+          const options = await requestYouTubeOptions(tab.url);
 
-        setDownloadOptions(options);
-        setIsLoadingDownloadOptions(false);
-        return;
+          if (options.length) {
+            setDownloadOptions(options);
+            setIsLoadingDownloadOptions(false);
+            return;
+          }
+        } catch (helperError) {
+          if (isYouTubeUrl(tab.url)) {
+            throw helperError;
+          }
+        }
       }
 
       chrome.tabs.sendMessage(

@@ -1,9 +1,10 @@
 .App {
   box-sizing: border-box;
   text-align: center;
-  width: 320px;
+  width: 300px;
   padding: 12px;
   background-color: #282c34;
+  overflow: hidden;
 }
 
 .App-logo {
@@ -26,6 +27,7 @@
   gap: 8px;
   font-size: 14px;
   color: white;
+  min-width: 0;
 }
 
 .App-donate-image {
@@ -34,7 +36,7 @@
 
 .App-title {
   margin: 0;
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -186,17 +188,20 @@
 .App-slider-row {
   margin-top: 15px;
   text-align: left;
+  min-width: 0;
 }
 
 .App-slider-row input[type='range'] {
   display: block;
   width: 100%;
+  min-width: 0;
 }
 
 .App-slider-value {
-  flex: 0 0 54px;
+  flex: 0 0 48px;
   padding: 5px;
   text-align: right;
+  white-space: nowrap;
 }
 
 select,
@@ -204,14 +209,58 @@ input,
 button {
   box-sizing: border-box;
   max-width: 100%;
+  min-width: 0;
 }
 
 select {
-  width: 112px;
+  width: 104px;
 }
 
 button {
   margin: 0 2px;
+  white-space: nowrap;
+}
+
+.App-container > .u-flex {
+  min-width: 0;
+}
+
+.App-container > .u-flex.u-jc-space-evenly {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, auto);
+  justify-content: center;
+  gap: 8px;
+}
+
+.App-container > .u-flex.u-jc-space-evenly button {
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.App-player-controls {
+  min-width: 0;
+  width: 100%;
+}
+
+.App-player-controls .u-flex {
+  justify-content: center;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.App-player-controls input[type='number'] {
+  width: 92px;
+}
+
+.App-player-controls button {
+  flex: 0 1 auto;
+}
+
+.u-jc-space-between > label {
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

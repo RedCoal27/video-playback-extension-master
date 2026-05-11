@@ -12,7 +12,6 @@
   },
   "content_scripts": [
     {
-      "all_frames": false,
       "matches": [
         "http://*/*",
         "https://*/*"
@@ -42,7 +41,9 @@
   "manifest_version": 3,
   "permissions": [
     "storage",
-    "downloads"
+    "downloads",
+    "scripting",
+    "webNavigation"
   ],
   "host_permissions": [
     "http://*/*",
