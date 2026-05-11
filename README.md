@@ -1,48 +1,39 @@
 # Video Playback + Volume + Download
 
-A Chrome/Brave extension for controlling HTML5 video playback, boosting volume, and downloading media through a small local Windows companion app.
+A Chrome/Brave extension for controlling HTML5 video playback, boosting volume, and downloading online media through a small Windows companion app.
 
-This project is based on the original [Video Playback Extension](https://github.com/sunnyw1212/video-playback-extension). It keeps the original idea of a lightweight popup for media controls, then extends it with persistent settings, a volume booster, a more direct speed control, and companion-powered downloads for sites where browser downloads are not enough.
+This project is based on the original [Video Playback Extension](https://github.com/sunnyw1212/video-playback-extension). The goal of this fork is to keep the simple media-control popup while adding practical tools for daily video use: persistent playback settings, volume boost, clearer speed controls, and download support for regular HTML5 videos and yt-dlp compatible sites.
 
-## Credits
+## Features
 
-Built from and inspired by:
+- Control playback speed from a simple slider.
+- Boost video and audio volume above 100%.
+- Apply controls to the current tab or all open tabs.
+- Keep the last configured settings for future videos.
+- Play, pause, restart, loop, skip, and use theater mode.
+- Customize keyboard shortcuts.
+- Detect downloadable media from the current page.
+- Preview available download formats and qualities before downloading.
+- Download simple HTML5 media directly through the browser.
+- Use a Windows companion app for more advanced downloads, including streams and yt-dlp supported sites.
+- Follow active downloads from the popup or the companion app.
+- Queue multiple downloads in parallel.
 
-- [sunnyw1212/video-playback-extension](https://github.com/sunnyw1212/video-playback-extension)
-- [Video Playback Extension on the Chrome Web Store](https://chromewebstore.google.com/detail/video-playback-extension/dilncfnkialpgbnpcjmghnepnankdibk)
-- [chrome-extension-boilerplate-react](https://github.com/lxieyang/chrome-extension-boilerplate-react)
+## Companion App
 
-The download companion uses local binaries from:
+Some sites do not expose a direct file that Chrome can download cleanly. For those cases, the extension can talk to a local Windows companion app.
+
+The companion handles media inspection and advanced downloads using:
 
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg)
 - [aria2](https://github.com/aria2/aria2)
 
-## Features
-
-- Control playback speed from the popup.
-- Boost video/audio volume above 100%.
-- Apply controls to the current tab or every open tab.
-- Keep the last configured settings and reuse them on future videos.
-- Play, pause, restart, loop, skip forward/backward, and theater mode.
-- Configurable keyboard shortcuts.
-- Detect downloadable HTML5 media and common streaming sources.
-- Show available download formats/qualities before starting a download.
-- Use a local companion app for advanced downloads, including streams and yt-dlp supported sites.
-- Track download progress from both the popup and the companion app.
-- Queue multiple downloads in the companion.
-
-## How It Works
-
-The browser extension handles playback controls directly inside web pages.
-
-For downloads, simple media files can be passed to Chrome directly. More complex cases are sent to the local companion app, which runs on Windows and exposes a local server at:
+The companion runs locally on:
 
 ```text
 http://127.0.0.1:47829
 ```
-
-The companion uses yt-dlp, FFmpeg, and aria2 to inspect media formats, download streams, merge audio/video when needed, and save the final file to the Windows Downloads folder.
 
 ## Installation
 
@@ -63,23 +54,23 @@ Load the extension:
 3. Click `Load unpacked`.
 4. Select the `build` folder.
 
-Start the companion by double-clicking:
+Start the companion by launching:
+
+```text
+Video Playback Helper.exe
+```
+
+If the executable is not available, use:
 
 ```text
 Video Playback Helper.vbs
-```
-
-If that does not work, use:
-
-```text
-Video Playback Helper.cmd
 ```
 
 ## Usage
 
 Open a page with a video, click the extension icon, then adjust playback speed, volume, loop, theater mode, or download options.
 
-For downloads, click `Download Media`. The popup will either show direct media choices or ask the companion to inspect the page and return the available formats.
+For downloads, click `Download Media`. The popup will show direct media choices when possible, or ask the companion to inspect the page and return available formats.
 
 ## Development
 
@@ -109,6 +100,12 @@ npm run install:ffmpeg
 npm run install:aria2
 ```
 
+Build the Windows helper launcher:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File utils/build-helper-exe.ps1
+```
+
 Force-stop companion-related background processes:
 
 ```powershell
@@ -125,12 +122,23 @@ Get-Process node,aria2c,yt-dlp,ffmpeg -ErrorAction SilentlyContinue | Stop-Proce
 - `tools`: local yt-dlp, FFmpeg, and aria2 binaries.
 - `build`: compiled extension loaded into Chrome/Brave.
 
+## Credits
+
+Original project:
+
+- [sunnyw1212/video-playback-extension](https://github.com/sunnyw1212/video-playback-extension)
+- [Video Playback Extension on the Chrome Web Store](https://chromewebstore.google.com/detail/video-playback-extension/dilncfnkialpgbnpcjmghnepnankdibk)
+- [chrome-extension-boilerplate-react](https://github.com/lxieyang/chrome-extension-boilerplate-react)
+
+Fork direction, testing, and feature requests by **RedCoal**.
+
+Implementation assistance by **OpenAI Codex**.
+
 ## Limitations
 
 - DRM-protected media is not supported.
-- Some sites block downloads or change their media system often.
-- Stream progress can be approximate, especially for live or fragmented media.
-- YouTube and other platforms depend on yt-dlp support.
+- Some sites block downloads or frequently change how their media works.
+- Platform support depends partly on yt-dlp compatibility.
 
 ## License
 

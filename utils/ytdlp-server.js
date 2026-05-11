@@ -15,17 +15,6 @@ const LOCAL_FFMPEG = path.join(LOCAL_FFMPEG_DIR, 'ffmpeg.exe');
 const LOCAL_ARIA2C = path.join(__dirname, '..', 'tools', 'aria2', 'aria2c.exe');
 const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
-const YOUTUBE_AUDIO_LANGUAGE_CODES = [
-  'af', 'az', 'id', 'ms', 'bs', 'ca', 'cs', 'da', 'de', 'et',
-  'en-IN', 'en-GB', 'en', 'es', 'es-419', 'es-US', 'eu', 'fil',
-  'fr', 'fr-CA', 'gl', 'hr', 'zu', 'is', 'it', 'sw', 'lv', 'lt',
-  'hu', 'nl', 'no', 'uz', 'pl', 'pt-PT', 'pt', 'ro', 'sq', 'sk',
-  'sl', 'sr-Latn', 'fi', 'sv', 'vi', 'tr', 'be', 'bg', 'ky', 'kk',
-  'mk', 'mn', 'ru', 'sr', 'uk', 'el', 'hy', 'iw', 'ur', 'ar', 'fa',
-  'ne', 'mr', 'hi', 'as', 'bn', 'pa', 'gu', 'or', 'ta', 'te', 'kn',
-  'ml', 'si', 'th', 'lo', 'my', 'ka', 'am', 'km', 'zh-CN', 'zh-TW',
-  'zh-HK', 'ja', 'ko',
-];
 
 let cachedYtDlp = null;
 let latestJobId = null;
@@ -682,6 +671,7 @@ const buildOptions = (info, pageUrl) => {
     .sort((a, b) => b - a);
   const audioTracks = getAudioTracks(formats);
   const audioIds = audioTracks.map((track) => track.formatId);
+  const shouldMergeAllAudio = pageUrl.includes('youtube.com/') || pageUrl.includes('youtu.be/');
   const audioSelector = audioIds.length > 1
     ? audioIds.join('+')
     : 'ba[ext=m4a]';
@@ -692,25 +682,39 @@ const buildOptions = (info, pageUrl) => {
 
   heights.slice(0, 8).forEach((height) => {
     const ext = getFormatExt(videoFormats, height);
-    const outputExt = audioIds.length > 1 ? 'mkv' : 'mp4';
+    const outputExt = shouldMergeAllAudio || audioIds.length > 1 ? 'mkv' : 'mp4';
     const videoSelector =
       ext === 'best'
         ? `bv*[height<=${height}]`
         : `bv*[height<=${height}][ext=${ext}]`;
+    const formatId = shouldMergeAllAudio
+      ? [
+          `${videoSelector}+mergeall[vcodec=none][acodec^=opus][abr>64]`,
+          `${videoSelector}+mergeall[vcodec=none][acodec^=mp4a][abr>64]`,
+          `${videoSelector}+${fallbackAudioSelector}`,
+          `b[height<=${height}]`,
+        ].join('/')
+      : `${videoSelector}+${audioSelector}/bv*[height<=${height}]+${fallbackAudioSelector}/b[height<=${height}]`;
 
     options.push({
       id: `yt-merged-${height}`,
       source: 'companion',
-      formatId: `${videoSelector}+${audioSelector}/bv*[height<=${height}]+${fallbackAudioSelector}/b[height<=${height}]`,
+      formatId,
       pageUrl,
       label: `${height}p best`,
       detail: formatDetail([
-        audioIds.length > 1 ? `video+${audioIds.length} audio tracks` : 'video+audio',
+        shouldMergeAllAudio
+          ? audioIds.length > 1
+            ? `video+all audio tracks (${audioIds.length} detected)`
+            : 'video+all available audio tracks'
+          : audioIds.length > 1
+            ? `video+${audioIds.length} audio tracks`
+            : 'video+audio',
         'merged by yt-dlp',
         outputExt.toUpperCase(),
       ]),
       audioTracks,
-      includesAllAudioTracks: audioIds.length > 1,
+      includesAllAudioTracks: shouldMergeAllAudio || audioIds.length > 1,
       mergeOutputFormat: outputExt,
     });
   });
@@ -771,34 +775,48 @@ const getAudioTracks = (formats) => {
         (!format.vcodec || format.vcodec === 'none')
     )
     .forEach((format) => {
+      const track = format.audio_track || {};
       const language =
         format.language ||
-        format.audio_track?.id ||
-        format.audio_track?.displayName ||
+        track.id ||
+        track.lang ||
+        track.languageCode ||
+        track.language ||
+        track.displayName ||
+        track.name ||
+        format.format_note ||
         'audio';
       const label = sanitizeText(
-        format.audio_track?.displayName ||
+        track.displayName ||
+          track.name ||
+          track.language ||
           format.language ||
+          format.format_note ||
           'Audio'
       );
-      const key = `${format.audio_track?.id || language}`.toLowerCase();
+      const key = `${track.id || track.lang || track.languageCode || language}`.toLowerCase();
       const existing = byLanguage.get(key);
       const bitrate = format.abr || format.tbr || 0;
+      const score =
+        bitrate +
+        (format.ext === 'm4a' ? 2 : 0) +
+        (/original/i.test(`${format.format_note} ${label}`) ? 1 : 0);
 
-      if (!existing || bitrate > existing.bitrate) {
+      if (!existing || score > existing.score) {
         byLanguage.set(key, {
           formatId: format.format_id,
           label,
           language: String(language),
           ext: format.ext || 'audio',
           bitrate,
+          score,
         });
       }
     });
 
-  return Array.from(byLanguage.values()).sort((a, b) =>
-    a.label.localeCompare(b.label)
-  );
+  return Array.from(byLanguage.values())
+    .sort((a, b) => a.label.localeCompare(b.label))
+    .map(({ score, ...track }) => track);
 };
 
 const handleFormats = async (request, response, url) => {
@@ -816,8 +834,6 @@ const handleFormats = async (request, response, url) => {
       '--no-playlist',
       '--no-warnings',
       ...getHeaderArgs(referer),
-      '--extractor-args',
-      `youtube:lang=${YOUTUBE_AUDIO_LANGUAGE_CODES.join(',')}`,
       pageUrl,
     ], 15000);
     const info = JSON.parse(stdout);

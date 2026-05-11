@@ -10,6 +10,7 @@
     "install:ffmpeg": "node utils/install-ffmpeg.js",
     "install:aria2": "node utils/install-aria2.js",
     "ytdlp-server": "node utils/ytdlp-server.js",
+    "build:helper": "powershell -ExecutionPolicy Bypass -File utils/build-helper-exe.ps1",
     "prettier": "prettier --write '**/*.{js,jsx,css,html}'"
   },
   "dependencies": {

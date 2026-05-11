@@ -26,7 +26,7 @@ import {
   sendMessageToTabs,
 } from '../../helpers';
 
-import logo from '../../assets/img/logo.svg';
+import logo from '../../assets/img/logo.png';
 import '../../assets/img/icon34.png';
 import '../../assets/img/icon34-inactive.png';
 import './Popup.css';
@@ -316,6 +316,7 @@ const Popup: React.FC = () => {
   );
   const [isStartingDownload, setIsStartingDownload] = useState(false);
   const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([]);
+  const [areDownloadJobsVisible, setAreDownloadJobsVisible] = useState(true);
 
   const applyToSelectRef = useRef<HTMLSelectElement>(null);
 
@@ -612,6 +613,7 @@ const Popup: React.FC = () => {
   const handleDownloadButtonClick = async () => {
     setDownloadError('');
     setDownloadOptions([]);
+    setAreDownloadJobsVisible(true);
     setIsLoadingDownloadOptions(true);
 
     try {
@@ -717,6 +719,7 @@ const Popup: React.FC = () => {
           },
           ...jobs.filter((job) => job.id !== jobId),
         ]);
+        setAreDownloadJobsVisible(true);
       } catch (error) {
         setDownloadError(getHelperError(error));
       } finally {
@@ -910,6 +913,16 @@ const Popup: React.FC = () => {
               </button>
             </div>
 
+            {!areDownloadJobsVisible && !!downloadJobs.length && (
+              <button
+                className="App-inline-link u-margin-top-15"
+                type="button"
+                onClick={() => setAreDownloadJobsVisible(true)}
+              >
+                Show downloads ({downloadJobs.length})
+              </button>
+            )}
+
             {!!downloadError && (
               <div className="App-download-error u-margin-top-15">
                 {downloadError}
@@ -918,6 +931,15 @@ const Popup: React.FC = () => {
 
             {!!downloadOptions.length && (
               <div className="App-download-options u-margin-top-15">
+                <div className="App-panel-header">
+                  <strong>Available formats</strong>
+                  <button
+                    type="button"
+                    onClick={() => setDownloadOptions([])}
+                  >
+                    Hide
+                  </button>
+                </div>
                 {downloadOptions.map((option) => (
                   <button
                     key={`${option.id}-${option.url || option.formatId}`}
@@ -942,8 +964,17 @@ const Popup: React.FC = () => {
               </div>
             )}
 
-            {!!downloadJobs.length && (
+            {areDownloadJobsVisible && !!downloadJobs.length && (
               <div className="App-download-status u-margin-top-15">
+                <div className="App-panel-header">
+                  <strong>Downloads</strong>
+                  <button
+                    type="button"
+                    onClick={() => setAreDownloadJobsVisible(false)}
+                  >
+                    Hide
+                  </button>
+                </div>
                 {downloadJobs.slice(0, 4).map((downloadJob) => (
                   <div
                     className="App-download-job"

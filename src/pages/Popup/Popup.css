@@ -84,6 +84,30 @@
   align-items: center;
 }
 
+.App-inline-link {
+  border: 0;
+  background: transparent;
+  color: #b7d7ff;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0;
+}
+
+.App-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #fff;
+  font-size: 13px;
+}
+
+.App-panel-header button {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  font-size: 12px;
+}
+
 .App-download-error {
   color: #ffb4a8;
   font-size: 13px;
