@@ -438,15 +438,19 @@ const handleMessage = (
       .then((options) => {
         if (options.length) {
           sendResponse({ ok: true, options });
+          return;
         }
+
+        sendResponse({
+          ok: false,
+          error: 'No downloadable media found on this page.',
+        });
       })
       .catch((error) => {
-        if (window.top === window) {
-          sendResponse({
-            ok: false,
-            error: error?.message || 'Failed to get download options.',
-          });
-        }
+        sendResponse({
+          ok: false,
+          error: error?.message || 'Failed to get download options.',
+        });
       });
 
     return true;

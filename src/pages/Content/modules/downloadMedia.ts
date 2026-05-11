@@ -9,6 +9,7 @@ export type DownloadOption = {
   source?: 'direct' | 'companion';
   formatId?: string;
   pageUrl?: string;
+  referer?: string;
   mergeOutputFormat?: 'mp4' | 'mkv';
 };
 
@@ -49,9 +50,33 @@ const getExtensionFromUrl = (value: string): string | null => {
   }
 };
 
-const isStreamUrl = (value: string) =>
-  /\.(m3u8|mpd)(?:[?#]|$)/i.test(value) ||
-  /(?:hls|dash|manifest|playlist|master)(?:[/?#._-]|$)/i.test(value);
+const getFilenameFromUrl = (value: string): string | null => {
+  try {
+    const pathname = new URL(value).pathname;
+    const filename = decodeURIComponent(pathname.split('/').pop() || '');
+    const sanitized = sanitizeFilename(filename);
+
+    return sanitized.includes('.') ? sanitized : null;
+  } catch (error) {
+    return null;
+  }
+};
+
+const isKnownNonMediaUrl = (value: string) =>
+  /\.(webmanifest|json|js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ttf)(?:[?#]|$)/i.test(
+    value
+  );
+
+const isStreamUrl = (value: string) => {
+  if (isKnownNonMediaUrl(value)) {
+    return false;
+  }
+
+  return (
+    /\.(m3u8|mpd)(?:[?#]|$)/i.test(value) ||
+    /(?:hls|dash|playlist|master)(?:[/?#._-]|$)/i.test(value)
+  );
+};
 
 const isDirectMediaUrl = (value: string) =>
   /\.(mp4|webm|mkv|mov|m4v|mp3|m4a|aac|ogg|oga|wav|flac)(?:[?#]|$)/i.test(
@@ -66,7 +91,9 @@ const getAbsoluteUrl = (value: string) => {
   }
 };
 
-const getStreamUrlsFromPage = () => {
+const getCompanionReferer = () => document.referrer || window.location.href;
+
+const getUrlsFromPage = (predicate: (value: string) => boolean) => {
   const urls = new Set<string>();
   const addUrl = (value?: string | null) => {
     if (!value) {
@@ -75,7 +102,7 @@ const getStreamUrlsFromPage = () => {
 
     const absoluteUrl = getAbsoluteUrl(value);
 
-    if (absoluteUrl && isStreamUrl(absoluteUrl)) {
+    if (absoluteUrl && predicate(absoluteUrl)) {
       urls.add(absoluteUrl);
     }
   };
@@ -92,6 +119,53 @@ const getStreamUrlsFromPage = () => {
   });
 
   return Array.from(urls);
+};
+
+const getStreamUrlsFromPage = () => getUrlsFromPage(isStreamUrl);
+
+const getDirectMediaUrlsFromPage = () => getUrlsFromPage(isDirectMediaUrl);
+
+const isCrossOriginUrl = (value: string) => {
+  try {
+    return new URL(value).origin !== window.location.origin;
+  } catch (error) {
+    return false;
+  }
+};
+
+const createDirectMediaOptions = (
+  mediaUrl: string,
+  index = 0
+): DownloadOption[] => {
+  const extension = getExtensionFromUrl(mediaUrl) || 'mp4';
+  const urlFilename = getFilenameFromUrl(mediaUrl);
+  const baseName = sanitizeFilename(document.title || 'video');
+  const filename =
+    urlFilename || `${baseName}${index ? `-${index + 1}` : ''}.${extension}`;
+  const detailPrefix = `${extension.toUpperCase()} direct source`;
+  const companionOption: DownloadOption = {
+    id: `html5-current-helper-${index}`,
+    label: urlFilename || (index === 0 ? 'Current media via compagnon' : `Media ${index + 1} via compagnon`),
+    detail: `${detailPrefix} - with page referer`,
+    source: 'companion',
+    formatId: 'direct',
+    pageUrl: mediaUrl,
+    filename: urlFilename || undefined,
+    referer: getCompanionReferer(),
+    mergeOutputFormat: 'mp4',
+  };
+  const directOption: DownloadOption = {
+    id: `html5-current-${index}`,
+    label: index === 0 ? 'Current HTML5 media' : `HTML5 media ${index + 1}`,
+    detail: detailPrefix,
+    source: 'direct',
+    url: mediaUrl,
+    filename,
+  };
+
+  return isCrossOriginUrl(mediaUrl)
+    ? [companionOption, directOption]
+    : [directOption, companionOption];
 };
 
 const requestBrowserDownload = (url: string, filename: string) => {
@@ -132,7 +206,9 @@ const getHtml5DownloadOptions = (): DownloadOption[] => {
 
   const mediaUrl = media.currentSrc || media.src;
 
+  const directMediaUrls = getDirectMediaUrlsFromPage();
   const streamUrls = getStreamUrlsFromPage();
+  const companionReferer = getCompanionReferer();
 
   if (streamUrls.length) {
     return streamUrls.map((streamUrl, index) => ({
@@ -145,6 +221,7 @@ const getHtml5DownloadOptions = (): DownloadOption[] => {
       source: 'companion',
       formatId: 'bestvideo+bestaudio/best',
       pageUrl: streamUrl,
+      referer: companionReferer,
       mergeOutputFormat: 'mp4',
     }));
   }
@@ -158,12 +235,19 @@ const getHtml5DownloadOptions = (): DownloadOption[] => {
         source: 'companion',
         formatId: 'bestvideo+bestaudio/best',
         pageUrl: window.location.href,
+        referer: companionReferer,
         mergeOutputFormat: 'mp4',
       },
     ];
   }
 
   if (mediaUrl.startsWith('blob:') || !isDirectMediaUrl(mediaUrl)) {
+    if (directMediaUrls.length) {
+      return directMediaUrls.flatMap((directMediaUrl, index) =>
+        createDirectMediaOptions(directMediaUrl, index)
+      );
+    }
+
     return [
       {
         id: 'html5-blob-helper',
@@ -172,25 +256,13 @@ const getHtml5DownloadOptions = (): DownloadOption[] => {
         source: 'companion',
         formatId: 'bestvideo+bestaudio/best',
         pageUrl: window.location.href,
+        referer: companionReferer,
         mergeOutputFormat: 'mp4',
       },
     ];
   }
 
-  const extension = getExtensionFromUrl(mediaUrl) || 'mp4';
-  const baseName = sanitizeFilename(document.title || 'video');
-  const filename = `${baseName}.${extension}`;
-
-  return [
-    {
-      id: 'html5-current',
-      label: 'Current HTML5 media',
-      detail: `${extension.toUpperCase()} direct source`,
-      source: 'direct',
-      url: mediaUrl,
-      filename,
-    },
-  ];
+  return createDirectMediaOptions(mediaUrl);
 };
 
 const isYouTubePage = (href: string) => {

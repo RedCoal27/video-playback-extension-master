@@ -8,6 +8,7 @@
     "start": "node utils/webserver.js",
     "install:ytdlp": "node utils/install-ytdlp.js",
     "install:ffmpeg": "node utils/install-ffmpeg.js",
+    "install:aria2": "node utils/install-aria2.js",
     "ytdlp-server": "node utils/ytdlp-server.js",
     "prettier": "prettier --write '**/*.{js,jsx,css,html}'"
   },

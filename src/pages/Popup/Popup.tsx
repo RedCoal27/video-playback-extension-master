@@ -48,6 +48,7 @@ type DownloadOption = {
   source?: 'direct' | 'companion';
   formatId?: string;
   pageUrl?: string;
+  referer?: string;
   audioTracks?: AudioTrack[];
   includesAllAudioTracks?: boolean;
   mergeOutputFormat?: 'mp4' | 'mkv';
@@ -70,6 +71,9 @@ type AudioTrack = {
 };
 
 const YTDLP_HELPER_URL = 'http://127.0.0.1:47829';
+const HELPER_FORMAT_TIMEOUT_MS = 4500;
+const YOUTUBE_FORMAT_TIMEOUT_MS = 20000;
+const CONTENT_OPTIONS_TIMEOUT_MS = 6000;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
@@ -99,10 +103,22 @@ const getHelperError = (error: unknown) => {
   return 'Compagnon indisponible. Lance Video Playback Helper.vbs.';
 };
 
-const requestYouTubeOptions = async (pageUrl: string) => {
+const createTimeoutSignal = (timeoutMs: number) => {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  return { controller, timeoutId };
+};
+
+const requestYouTubeOptions = async (
+  pageUrl: string,
+  timeoutMs = HELPER_FORMAT_TIMEOUT_MS
+) => {
+  const { controller, timeoutId } = createTimeoutSignal(timeoutMs);
   const response = await fetch(
-    `${YTDLP_HELPER_URL}/formats?url=${encodeURIComponent(pageUrl)}`
-  );
+    `${YTDLP_HELPER_URL}/formats?url=${encodeURIComponent(pageUrl)}`,
+    { signal: controller.signal }
+  ).finally(() => window.clearTimeout(timeoutId));
   const data = await response.json().catch(() => null);
 
   if (!response.ok || !data?.ok) {
@@ -114,6 +130,37 @@ const requestYouTubeOptions = async (pageUrl: string) => {
   return data.options || [];
 };
 
+const requestPageDownloadOptions = (tabID: number): Promise<DownloadOption[]> =>
+  new Promise((resolve, reject) => {
+    const timeoutId = window.setTimeout(() => {
+      reject(new Error('Media detection timed out on this page.'));
+    }, CONTENT_OPTIONS_TIMEOUT_MS);
+
+    chrome.tabs.sendMessage(
+      tabID,
+      { type: GET_DOWNLOAD_OPTIONS, payload: null },
+      (response) => {
+        window.clearTimeout(timeoutId);
+
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message || ''));
+          return;
+        }
+
+        if (!response?.ok) {
+          reject(
+            new Error(
+              response?.error || 'No downloadable media found on this page.'
+            )
+          );
+          return;
+        }
+
+        resolve(response.options || []);
+      }
+    );
+  });
+
 const requestYouTubeDownload = async (option: DownloadOption) => {
   const response = await fetch(`${YTDLP_HELPER_URL}/download`, {
     method: 'POST',
@@ -124,6 +171,8 @@ const requestYouTubeDownload = async (option: DownloadOption) => {
       url: option.pageUrl,
       formatId: option.formatId,
       label: option.label,
+      filename: option.filename,
+      referer: option.referer,
       mergeOutputFormat: option.mergeOutputFormat,
     }),
   });
@@ -136,15 +185,15 @@ const requestYouTubeDownload = async (option: DownloadOption) => {
   return data.jobId as string;
 };
 
-const requestDownloadJob = async (jobId: string): Promise<DownloadJob | null> => {
-  const response = await fetch(`${YTDLP_HELPER_URL}/jobs/${jobId}`);
+const requestDownloadJobs = async (): Promise<DownloadJob[]> => {
+  const response = await fetch(`${YTDLP_HELPER_URL}/jobs`);
   const data = await response.json().catch(() => null);
 
   if (!response.ok || !data?.ok) {
-    return null;
+    return [];
   }
 
-  return data.job;
+  return data.jobs || [];
 };
 
 const setExtensionIcon = (path: string) => {
@@ -168,8 +217,7 @@ const Popup: React.FC = () => {
     false
   );
   const [isStartingDownload, setIsStartingDownload] = useState(false);
-  const [activeDownloadJobId, setActiveDownloadJobId] = useState('');
-  const [downloadJob, setDownloadJob] = useState<DownloadJob | null>(null);
+  const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([]);
 
   const applyToSelectRef = useRef<HTMLSelectElement>(null);
 
@@ -298,33 +346,25 @@ const Popup: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!activeDownloadJobId) {
-      return undefined;
-    }
-
     let isMounted = true;
-    const pollJob = async () => {
-      const job = await requestDownloadJob(activeDownloadJobId);
+    const pollJobs = async () => {
+      const jobs = await requestDownloadJobs();
 
-      if (!isMounted || !job) {
+      if (!isMounted) {
         return;
       }
 
-      setDownloadJob(job);
-
-      if (job.status === 'complete' || job.status === 'error') {
-        setActiveDownloadJobId('');
-      }
+      setDownloadJobs(jobs);
     };
-    const interval = window.setInterval(pollJob, 1000);
+    const interval = window.setInterval(pollJobs, 1000);
 
-    pollJob();
+    pollJobs();
 
     return () => {
       isMounted = false;
       window.clearInterval(interval);
     };
-  }, [activeDownloadJobId]);
+  }, []);
 
   const handleEnabledButtonClick = async () => {
     chrome.storage.sync.set({
@@ -474,7 +514,6 @@ const Popup: React.FC = () => {
   const handleDownloadButtonClick = async () => {
     setDownloadError('');
     setDownloadOptions([]);
-    setDownloadJob(null);
     setIsLoadingDownloadOptions(true);
 
     try {
@@ -486,9 +525,12 @@ const Popup: React.FC = () => {
         throw new Error('No active tab found.');
       }
 
-      if (tab.url) {
+      if (isYouTubeUrl(tab.url)) {
         try {
-          const options = await requestYouTubeOptions(tab.url);
+          const options = await requestYouTubeOptions(
+            tab.url,
+            YOUTUBE_FORMAT_TIMEOUT_MS
+          );
 
           if (options.length) {
             setDownloadOptions(options);
@@ -496,33 +538,31 @@ const Popup: React.FC = () => {
             return;
           }
         } catch (helperError) {
-          if (isYouTubeUrl(tab.url)) {
-            throw helperError;
-          }
+          throw helperError;
         }
       }
 
-      chrome.tabs.sendMessage(
-        tabID,
-        { type: GET_DOWNLOAD_OPTIONS, payload: null },
-        (response) => {
-          setIsLoadingDownloadOptions(false);
-
-          if (chrome.runtime.lastError) {
-            setDownloadError(chrome.runtime.lastError.message || '');
-            return;
-          }
-
-          if (!response?.ok) {
-            setDownloadError(
-              response?.error || 'No downloadable media found on this page.'
-            );
-            return;
-          }
-
-          setDownloadOptions(response.options || []);
+      try {
+        const options = await requestPageDownloadOptions(tabID);
+        setDownloadOptions(options);
+      } catch (pageError) {
+        if (!tab.url) {
+          throw pageError;
         }
-      );
+
+        const helperOptions = await requestYouTubeOptions(
+          tab.url,
+          HELPER_FORMAT_TIMEOUT_MS
+        );
+
+        if (!helperOptions.length) {
+          throw pageError;
+        }
+
+        setDownloadOptions(helperOptions);
+      }
+
+      setIsLoadingDownloadOptions(false);
     } catch (error) {
       setIsLoadingDownloadOptions(false);
       setDownloadError(
@@ -541,14 +581,16 @@ const Popup: React.FC = () => {
       try {
         const jobId = await requestYouTubeDownload(option);
 
-        setActiveDownloadJobId(jobId);
-        setDownloadJob({
-          id: jobId,
-          label: option.label,
-          status: 'starting',
-          percent: 0,
-          message: 'Download started...',
-        });
+        setDownloadJobs((jobs) => [
+          {
+            id: jobId,
+            label: option.label,
+            status: 'starting',
+            percent: 0,
+            message: 'Download started...',
+          },
+          ...jobs.filter((job) => job.id !== jobId),
+        ]);
       } catch (error) {
         setDownloadError(getHelperError(error));
       } finally {
@@ -584,13 +626,16 @@ const Popup: React.FC = () => {
         return;
       }
 
-      setDownloadJob({
-        id: 'browser-download',
-        label: option.label,
-        status: 'complete',
-        percent: 100,
-        message: 'Download started in Chrome.',
-      });
+      setDownloadJobs((jobs) => [
+        {
+          id: `browser-download-${Date.now()}`,
+          label: option.label,
+          status: 'complete',
+          percent: 100,
+          message: 'Download started in Chrome.',
+        },
+        ...jobs,
+      ]);
     });
   };
 
@@ -745,17 +790,24 @@ const Popup: React.FC = () => {
               </div>
             )}
 
-            {!!downloadJob && (
+            {!!downloadJobs.length && (
               <div className="App-download-status u-margin-top-15">
-                <div className="u-flex u-jc-space-between u-ai-center">
-                  <strong>{downloadJob.label}</strong>
-                  <span>{Math.round(downloadJob.percent || 0)}%</span>
-                </div>
-                <progress
-                  max={100}
-                  value={downloadJob.percent || 0}
-                />
-                <small>{downloadJob.message}</small>
+                {downloadJobs.slice(0, 4).map((downloadJob) => (
+                  <div
+                    className="App-download-job"
+                    key={downloadJob.id}
+                  >
+                    <div className="u-flex u-jc-space-between u-ai-center">
+                      <strong>{downloadJob.label}</strong>
+                      <span>{Math.round(downloadJob.percent || 0)}%</span>
+                    </div>
+                    <progress
+                      max={100}
+                      value={downloadJob.percent || 0}
+                    />
+                    <small>{downloadJob.message}</small>
+                  </div>
+                ))}
               </div>
             )}
 
@@ -767,7 +819,7 @@ const Popup: React.FC = () => {
                     className="App-download-option"
                     type="button"
                     title={option.detail}
-                    disabled={isStartingDownload || !!activeDownloadJobId}
+                    disabled={isStartingDownload}
                     onClick={() => handleDownloadOptionClick(option)}
                   >
                     <span>{option.label}</span>

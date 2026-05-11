@@ -10,6 +10,9 @@ const DOWNLOAD_DIR = process.env.YTDLP_DOWNLOAD_DIR || path.join(os.homedir(), '
 const LOCAL_YTDLP = path.join(__dirname, '..', 'tools', 'yt-dlp.exe');
 const LOCAL_FFMPEG_DIR = path.join(__dirname, '..', 'tools', 'ffmpeg', 'bin');
 const LOCAL_FFMPEG = path.join(LOCAL_FFMPEG_DIR, 'ffmpeg.exe');
+const LOCAL_ARIA2C = path.join(__dirname, '..', 'tools', 'aria2', 'aria2c.exe');
+const DEFAULT_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
 const YOUTUBE_AUDIO_LANGUAGE_CODES = [
   'af', 'az', 'id', 'ms', 'bs', 'ca', 'cs', 'da', 'de', 'et',
   'en-IN', 'en-GB', 'en', 'es', 'es-419', 'es-US', 'eu', 'fil',
@@ -40,7 +43,7 @@ const commandCandidates = [
 const sendJson = (response, statusCode, payload) => {
   response.writeHead(statusCode, {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json; charset=utf-8',
   });
@@ -85,7 +88,7 @@ const findYtDlp = () => {
   );
 };
 
-const runYtDlp = (args) =>
+const runYtDlp = (args, timeoutMs = 0) =>
   new Promise((resolve, reject) => {
     let candidate;
 
@@ -101,6 +104,15 @@ const runYtDlp = (args) =>
     });
     let stdout = '';
     let stderr = '';
+    let timeoutId = null;
+    let didTimeOut = false;
+
+    if (timeoutMs > 0) {
+      timeoutId = setTimeout(() => {
+        didTimeOut = true;
+        child.kill('SIGKILL');
+      }, timeoutMs);
+    }
 
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString();
@@ -110,6 +122,15 @@ const runYtDlp = (args) =>
     });
     child.on('error', reject);
     child.on('close', (code) => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+
+      if (didTimeOut) {
+        reject(new Error('yt-dlp format detection timed out.'));
+        return;
+      }
+
       if (code === 0) {
         resolve(stdout);
         return;
@@ -126,6 +147,7 @@ const createJob = (label) => {
     label,
     status: 'starting',
     percent: 0,
+    speed: '',
     message: 'Starting download...',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -143,14 +165,66 @@ const updateJob = (job, patch) => {
   });
 };
 
+const isRetryableServerError = (message) =>
+  /HTTP Error (429|500|502|503|504)|Service Temporarily Unavailable/i.test(
+    message || ''
+  );
+
+const killProcessTree = (pid) => {
+  if (!pid) {
+    return;
+  }
+
+  spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+    windowsHide: true,
+    stdio: 'ignore',
+  });
+};
+
+const killAria2cProcesses = () => {
+  spawnSync('taskkill', ['/IM', 'aria2c.exe', '/T', '/F'], {
+    windowsHide: true,
+    stdio: 'ignore',
+  });
+};
+
 const parseYtDlpLine = (line) => {
+  const normalizedLine = line.replace(/\s+/g, ' ').trim();
+
+  if (/^-{8,}$/.test(normalizedLine)) {
+    return null;
+  }
+
   const percentMatch = line.match(/\[download\]\s+(\d+(?:\.\d+)?)%/);
+  const speedMatch = line.match(/\bat\s+([^\s]+\/s)/i);
+  const aria2SpeedMatch = line.match(/\bDL:([^\]\s]+)/i);
+  const aria2SizeMatch = line.match(/\((\d+)%\)/);
+  const destinationMatch = normalizedLine.match(
+    /\[(?:download|Merger)\]\s+(?:Destination:|Merging formats into)\s+"?(.+?)"?$/
+  );
+
+  if (destinationMatch) {
+    return {
+      label: path.basename(destinationMatch[1]),
+      message: normalizedLine,
+    };
+  }
 
   if (percentMatch) {
     return {
       status: 'downloading',
       percent: Number(percentMatch[1]),
-      message: line.replace(/\s+/g, ' ').trim(),
+      speed: speedMatch ? speedMatch[1] : '',
+      message: normalizedLine,
+    };
+  }
+
+  if (aria2SpeedMatch || aria2SizeMatch) {
+    return {
+      status: 'downloading',
+      ...(aria2SizeMatch ? { percent: Number(aria2SizeMatch[1]) } : {}),
+      speed: aria2SpeedMatch ? aria2SpeedMatch[1] : '',
+      message: normalizedLine,
     };
   }
 
@@ -158,7 +232,8 @@ const parseYtDlpLine = (line) => {
     return {
       status: 'processing',
       percent: 100,
-      message: line.replace(/\s+/g, ' ').trim(),
+      speed: '',
+      message: normalizedLine,
     };
   }
 
@@ -166,22 +241,25 @@ const parseYtDlpLine = (line) => {
     return {
       status: 'complete',
       percent: 100,
+      speed: '',
       message: 'Already downloaded.',
     };
   }
 
   return {
-    message: line.replace(/\s+/g, ' ').trim(),
+    message: normalizedLine,
   };
 };
 
-const startYtDlp = (args, job) => {
+const startYtDlp = (args, job, fallbackArgs = null, retryCount = 0) => {
   const candidate = findYtDlp();
   const child = spawn(candidate.command, [...candidate.args, ...args], {
     windowsHide: true,
   });
   let stdoutBuffer = '';
   let stderrBuffer = '';
+
+  job.process = child;
 
   const handleOutput = (chunk, stream) => {
     const text = chunk.toString();
@@ -202,7 +280,11 @@ const startYtDlp = (args, job) => {
         return;
       }
 
-      updateJob(job, parseYtDlpLine(trimmed));
+      const patch = parseYtDlpLine(trimmed);
+
+      if (patch) {
+        updateJob(job, patch);
+      }
     });
   };
 
@@ -214,22 +296,155 @@ const startYtDlp = (args, job) => {
   child.stdout.on('data', (chunk) => handleOutput(chunk, 'stdout'));
   child.stderr.on('data', (chunk) => handleOutput(chunk, 'stderr'));
   child.on('close', (code) => {
+    if (job.process === child) {
+      job.process = null;
+    }
+
+    if (job.status === 'cancelled') {
+      return;
+    }
+
+    if (code !== 0 && fallbackArgs) {
+      killProcessTree(child.pid);
+      killAria2cProcesses();
+      cleanupAria2Artifacts(job);
+      updateJob(job, {
+        status: 'running',
+        percent: 0,
+        message: 'Mode rapide refuse, nettoyage puis tentative en mode standard...',
+      });
+      startYtDlp(fallbackArgs, job);
+      return;
+    }
+
+    if (code !== 0 && isRetryableServerError(job.message) && retryCount < 3) {
+      const delaySeconds = 10 * (retryCount + 1);
+
+      updateJob(job, {
+        status: 'waiting',
+        speed: '',
+        message: `Serveur temporairement indisponible. Nouvelle tentative dans ${delaySeconds}s...`,
+      });
+
+      setTimeout(() => {
+        if (job.status === 'cancelled' || job.status === 'deleted') {
+          return;
+        }
+
+        startYtDlp(args, job, null, retryCount + 1);
+      }, delaySeconds * 1000);
+      return;
+    }
+
     updateJob(
       job,
       code === 0
         ? {
             status: 'complete',
             percent: 100,
+            speed: '',
             message: 'Download complete.',
           }
         : {
             status: 'error',
+            speed: '',
             message: job.message || `yt-dlp download failed with code ${code}.`,
           }
     );
   });
 
   return child;
+};
+
+const getPublicJob = (job) => {
+  const { process, ...publicJob } = job;
+
+  return publicJob;
+};
+
+const cleanupAria2Artifacts = (job) => {
+  const cutoff = new Date(job.createdAt).getTime() - 5000;
+
+  try {
+    for (const filename of fs.readdirSync(DOWNLOAD_DIR)) {
+      if (!filename.endsWith('.aria2')) {
+        continue;
+      }
+
+      const artifactPath = path.join(DOWNLOAD_DIR, filename);
+      const stat = fs.statSync(artifactPath);
+
+      if (stat.mtimeMs < cutoff) {
+        continue;
+      }
+
+      fs.rmSync(artifactPath, { force: true });
+
+      const partialPath = artifactPath.slice(0, -'.aria2'.length);
+
+      if (fsExists(partialPath)) {
+        const partialStat = fs.statSync(partialPath);
+
+        if (partialStat.mtimeMs >= cutoff) {
+          fs.rmSync(partialPath, { force: true });
+        }
+      }
+    }
+  } catch (error) {
+    updateJob(job, {
+      message: 'Mode rapide refuse, nettoyage partiel impossible.',
+    });
+  }
+};
+
+const cleanupStaleAria2ControlFiles = () => {
+  try {
+    for (const filename of fs.readdirSync(DOWNLOAD_DIR)) {
+      if (filename.endsWith('.aria2')) {
+        fs.rmSync(path.join(DOWNLOAD_DIR, filename), { force: true });
+      }
+    }
+  } catch (error) {
+    // Best-effort cleanup only.
+  }
+};
+
+const stopJob = (job) => {
+  if (job.process && !job.process.killed) {
+    killProcessTree(job.process.pid);
+  }
+
+  killAria2cProcesses();
+  cleanupAria2Artifacts(job);
+
+  updateJob(job, {
+    status: 'cancelled',
+    speed: '',
+    message: 'Download stopped manually.',
+  });
+};
+
+const deleteJob = (jobId) => {
+  const job = jobs.get(jobId);
+
+  if (!job) {
+    return false;
+  }
+
+  if (job.process && !job.process.killed) {
+    killProcessTree(job.process.pid);
+  }
+
+  killAria2cProcesses();
+  cleanupAria2Artifacts(job);
+
+  updateJob(job, {
+    status: 'deleted',
+    speed: '',
+    message: 'Deleted from list.',
+  });
+  jobs.delete(jobId);
+  return true;
 };
 
 const fsExists = (filePath) => {
@@ -241,7 +456,26 @@ const fsExists = (filePath) => {
   }
 };
 
+const findAria2c = () => {
+  if (fsExists(LOCAL_ARIA2C)) {
+    return LOCAL_ARIA2C;
+  }
+
+  const result = spawnSync('aria2c', ['--version'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+
+  return result.status === 0 ? 'aria2c' : '';
+};
+
 const sanitizeText = (value) =>
+  String(value || '')
+    .replace(/[\\/:*?"<>|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const sanitizeFilename = (value) =>
   String(value || '')
     .replace(/[\\/:*?"<>|]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -258,6 +492,53 @@ const formatBytes = (value) => {
 };
 
 const formatDetail = (parts) => parts.filter(Boolean).join(' - ');
+
+const getHeaderArgs = (referer) => {
+  const args = [
+    '--user-agent',
+    DEFAULT_USER_AGENT,
+    '--add-header',
+    'Accept: */*',
+    '--add-header',
+    'Accept-Language: fr-FR,fr;q=0.9,en;q=0.8',
+  ];
+
+  if (referer) {
+    args.push('--referer', referer);
+  }
+
+  return args;
+};
+
+const getDownloadSpeedArgs = (formatId, useExternalDownloader = true) => {
+  const args = [
+    '--socket-timeout',
+    '15',
+    '--retries',
+    '10',
+    '--fragment-retries',
+    '10',
+  ];
+
+  if (formatId === 'direct') {
+    args.push('--http-chunk-size', '10M');
+  } else {
+    args.push('--concurrent-fragments', '8');
+  }
+
+  const aria2c = useExternalDownloader ? findAria2c() : '';
+
+  if (aria2c) {
+    args.push(
+      '--downloader',
+      aria2c,
+      '--downloader-args',
+      'aria2c:-x 16 -s 16 -k 1M --file-allocation=none --summary-interval=1'
+    );
+  }
+
+  return args;
+};
 
 const getFormatExt = (formats, height) => {
   const mp4 = formats.find(
@@ -423,7 +704,7 @@ const handleFormats = async (request, response, url) => {
       '--extractor-args',
       `youtube:lang=${YOUTUBE_AUDIO_LANGUAGE_CODES.join(',')}`,
       pageUrl,
-    ]);
+    ], 15000);
     const info = JSON.parse(stdout);
     const options = buildOptions(info, pageUrl);
 
@@ -445,36 +726,42 @@ const handleDownload = async (request, response) => {
     const body = JSON.parse((await getRequestBody(request)) || '{}');
     const pageUrl = body.url;
     const formatId = body.formatId;
-    const label = sanitizeText(body.label || 'YouTube download');
+    const referer = typeof body.referer === 'string' ? body.referer : '';
+    const requestedFilename = sanitizeFilename(body.filename || '');
+    const label = sanitizeText(requestedFilename || body.label || 'Media download');
     const mergeOutputFormat =
       body.mergeOutputFormat === 'mkv' || body.mergeOutputFormat === 'mp4'
         ? body.mergeOutputFormat
         : 'mp4';
 
-    if (!pageUrl || !formatId) {
+    if (!pageUrl) {
       sendJson(response, 400, { ok: false, error: 'Missing download parameters.' });
       return;
     }
 
     const job = createJob(label);
-
-    startYtDlp([
+    const shouldSelectFormat = formatId && formatId !== 'direct';
+    const createDownloadArgs = (useExternalDownloader) => [
       '--newline',
       '--no-playlist',
+      '--continue',
       '--audio-multistreams',
+      ...getHeaderArgs(referer),
+      ...getDownloadSpeedArgs(formatId, useExternalDownloader),
+      ...(formatId === 'direct' ? ['--add-header', 'Range: bytes=0-'] : []),
       ...(fsExists(LOCAL_FFMPEG)
         ? ['--ffmpeg-location', LOCAL_FFMPEG_DIR]
         : []),
-      '-f',
-      formatId,
-      '--merge-output-format',
-      mergeOutputFormat,
+      ...(shouldSelectFormat ? ['-f', formatId] : []),
+      ...(shouldSelectFormat ? ['--merge-output-format', mergeOutputFormat] : []),
       '-P',
       DOWNLOAD_DIR,
       '-o',
-      '%(title).200B [%(id)s].%(ext)s',
+      requestedFilename || '%(title).200B [%(id)s].%(ext)s',
       pageUrl,
-    ], job);
+    ];
+
+    startYtDlp(createDownloadArgs(true), job, createDownloadArgs(false));
 
     sendJson(response, 200, {
       ok: true,
@@ -490,6 +777,16 @@ const handleDownload = async (request, response) => {
 };
 
 const handleJob = (request, response, url) => {
+  if (url.pathname === '/jobs') {
+    sendJson(response, 200, {
+      ok: true,
+      jobs: Array.from(jobs.values())
+        .map(getPublicJob)
+        .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))),
+    });
+    return;
+  }
+
   const id = url.pathname === '/jobs/latest'
     ? latestJobId
     : url.pathname.replace('/jobs/', '');
@@ -505,7 +802,42 @@ const handleJob = (request, response, url) => {
 
   sendJson(response, 200, {
     ok: true,
-    job,
+    job: getPublicJob(job),
+  });
+};
+
+const handleStopJob = (request, response, url) => {
+  const id = url.pathname.replace('/jobs/', '').replace('/stop', '');
+  const job = jobs.get(id);
+
+  if (!job) {
+    sendJson(response, 404, {
+      ok: false,
+      error: 'No download job found.',
+    });
+    return;
+  }
+
+  stopJob(job);
+  sendJson(response, 200, {
+    ok: true,
+    job: getPublicJob(job),
+  });
+};
+
+const handleDeleteJob = (request, response, url) => {
+  const id = url.pathname.replace('/jobs/', '').replace('/delete', '');
+
+  if (!deleteJob(id)) {
+    sendJson(response, 404, {
+      ok: false,
+      error: 'No download job found.',
+    });
+    return;
+  }
+
+  sendJson(response, 200, {
+    ok: true,
   });
 };
 
@@ -536,8 +868,28 @@ const server = http.createServer((request, response) => {
   }
 
   if (
+    request.method === 'DELETE' &&
+    url.pathname.startsWith('/jobs/') &&
+    url.pathname.endsWith('/stop')
+  ) {
+    handleStopJob(request, response, url);
+    return;
+  }
+
+  if (
+    request.method === 'DELETE' &&
+    url.pathname.startsWith('/jobs/') &&
+    url.pathname.endsWith('/delete')
+  ) {
+    handleDeleteJob(request, response, url);
+    return;
+  }
+
+  if (
     request.method === 'GET' &&
-    (url.pathname === '/jobs/latest' || url.pathname.startsWith('/jobs/'))
+    (url.pathname === '/jobs' ||
+      url.pathname === '/jobs/latest' ||
+      url.pathname.startsWith('/jobs/'))
   ) {
     handleJob(request, response, url);
     return;
@@ -545,6 +897,8 @@ const server = http.createServer((request, response) => {
 
   sendJson(response, 404, { ok: false, error: 'Not found.' });
 });
+
+cleanupStaleAria2ControlFiles();
 
 server.listen(PORT, HOST, () => {
   console.log(`yt-dlp helper listening on http://${HOST}:${PORT}`);

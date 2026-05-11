@@ -91,6 +91,9 @@
 }
 
 .App-download-status {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 8px;
   border: 1px solid #4a5160;
   border-radius: 6px;
@@ -98,6 +101,11 @@
   font-size: 13px;
   line-height: 1.35;
   background: #20242c;
+}
+
+.App-download-job + .App-download-job {
+  padding-top: 8px;
+  border-top: 1px solid #3a404d;
 }
 
 .App-download-status strong,

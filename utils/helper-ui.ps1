@@ -5,9 +5,22 @@ $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $downloads = [Environment]::GetFolderPath('UserProfile') + '\Downloads'
 $ytDlp = Join-Path $root 'tools\yt-dlp.exe'
 $ffmpeg = Join-Path $root 'tools\ffmpeg\bin\ffmpeg.exe'
+$aria2c = Join-Path $root 'tools\aria2\aria2c.exe'
 $serverProcess = $null
 $isClosing = $false
-$lastJobNotification = ''
+$jobNotifications = @{}
+$createdNewInstance = $false
+$singleInstanceMutex = New-Object System.Threading.Mutex($true, 'Global\VideoPlaybackHelperSingleInstance', [ref]$createdNewInstance)
+
+if (-not $createdNewInstance) {
+  [System.Windows.Forms.MessageBox]::Show(
+    "Video Playback Helper est deja lance.",
+    "Video Playback Helper",
+    [System.Windows.Forms.MessageBoxButtons]::OK,
+    [System.Windows.Forms.MessageBoxIcon]::Information
+  ) | Out-Null
+  return
+}
 
 function Set-Status {
   param(
@@ -65,6 +78,13 @@ function Ensure-Tools {
     }
   }
 
+  if (-not (Test-Path $aria2c)) {
+    Set-Status "Installation de aria2c..." ([System.Drawing.Color]::Khaki)
+    if (-not (Run-NodeScript (Join-Path $root 'utils\install-aria2.js'))) {
+      Set-Status "aria2c indisponible, mode standard" ([System.Drawing.Color]::Khaki)
+    }
+  }
+
   return $true
 }
 
@@ -77,18 +97,58 @@ function Test-HelperAlive {
   }
 }
 
-function Get-LatestJob {
+function Get-Jobs {
   try {
-    $response = Invoke-RestMethod -Uri 'http://127.0.0.1:47829/jobs/latest' -TimeoutSec 2
+    $response = Invoke-RestMethod -Uri 'http://127.0.0.1:47829/jobs' -TimeoutSec 2
 
     if ($response.ok -eq $true) {
-      return $response.job
+      return @($response.jobs)
     }
   } catch {
-    return $null
+    return @()
   }
 
-  return $null
+  return @()
+}
+
+function Stop-SelectedJob {
+  if (-not $jobsListView.SelectedItems -or $jobsListView.SelectedItems.Count -eq 0) {
+    return
+  }
+
+  $jobId = [string]$jobsListView.SelectedItems[0].Tag
+  $jobStatus = [string]$jobsListView.SelectedItems[0].SubItems[4].Text
+
+  if (-not $jobId) {
+    return
+  }
+
+  $isFinished = $jobStatus -eq 'complete' -or $jobStatus -eq 'error' -or $jobStatus -eq 'cancelled'
+  $action = if ($isFinished) { 'delete' } else { 'stop' }
+
+  try {
+    Invoke-RestMethod -Uri "http://127.0.0.1:47829/jobs/$jobId/$action" -Method Delete -TimeoutSec 2 | Out-Null
+    Update-DownloadStatus
+  } catch {
+    Set-Status "Action impossible" ([System.Drawing.Color]::LightCoral)
+  }
+}
+
+function Update-SelectedJobDetails {
+  if (-not $jobsListView.SelectedItems -or $jobsListView.SelectedItems.Count -eq 0) {
+    $jobDetailsTextBox.Text = ''
+    $stopSelectedButton.Text = 'Arreter DL'
+    $stopSelectedButton.Enabled = $false
+    return
+  }
+
+  $selected = $jobsListView.SelectedItems[0]
+  $jobStatus = [string]$selected.SubItems[4].Text
+  $isFinished = $jobStatus -eq 'complete' -or $jobStatus -eq 'error' -or $jobStatus -eq 'cancelled'
+
+  $jobDetailsTextBox.Text = $selected.SubItems[3].Text
+  $stopSelectedButton.Text = if ($isFinished) { 'Supprimer' } else { 'Arreter DL' }
+  $stopSelectedButton.Enabled = $true
 }
 
 function Update-DownloadStatus {
@@ -96,47 +156,81 @@ function Update-DownloadStatus {
     return
   }
 
-  $job = Get-LatestJob
+  $jobs = Get-Jobs
 
-  if (-not $job) {
+  if (-not $jobs -or $jobs.Count -eq 0) {
+    $jobsListView.Items.Clear()
     return
   }
 
-  $percent = [Math]::Max(0, [Math]::Min(100, [int][Math]::Round([double]$job.percent)))
-  $progressBar.Value = $percent
-  $jobLabel.Text = "$($job.label) - $percent%"
-  $jobMessageLabel.Text = $job.message
+  $selectedJobId = ''
+  if ($jobsListView.SelectedItems -and $jobsListView.SelectedItems.Count -gt 0) {
+    $selectedJobId = [string]$jobsListView.SelectedItems[0].Tag
+  }
 
-  if ($job.status -eq 'complete') {
-    Set-Status "Telechargement termine" ([System.Drawing.Color]::LightGreen)
-    $notificationKey = "$($job.id):complete"
+  $jobsListView.BeginUpdate()
+  $jobsListView.Items.Clear()
 
-    if ($script:lastJobNotification -ne $notificationKey) {
-      $script:lastJobNotification = $notificationKey
-      $notifyIcon.ShowBalloonTip(
-        1800,
-        'Video Playback Helper',
-        'Telechargement termine.',
-        [System.Windows.Forms.ToolTipIcon]::Info
-      )
+  foreach ($job in $jobs) {
+    $percent = [Math]::Max(0, [Math]::Min(100, [int][Math]::Round([double]$job.percent)))
+    $item = New-Object System.Windows.Forms.ListViewItem("$($job.label)")
+    $item.Tag = "$($job.id)"
+    $stateText = if ($job.speed) { "$($job.speed)" } else { "$($job.status)" }
+    $item.SubItems.Add("$percent%") | Out-Null
+    $item.SubItems.Add($stateText) | Out-Null
+    $item.SubItems.Add("$($job.message)") | Out-Null
+    $item.SubItems.Add("$($job.status)") | Out-Null
+    $jobsListView.Items.Add($item) | Out-Null
+
+    if ($selectedJobId -and $selectedJobId -eq "$($job.id)") {
+      $item.Selected = $true
     }
-  } elseif ($job.status -eq 'error') {
-    Set-Status "Erreur de telechargement" ([System.Drawing.Color]::LightCoral)
-    $notificationKey = "$($job.id):error"
+  }
 
-    if ($script:lastJobNotification -ne $notificationKey) {
-      $script:lastJobNotification = $notificationKey
-      $notifyIcon.ShowBalloonTip(
-        2200,
-        'Video Playback Helper',
-        'Le telechargement a echoue.',
-        [System.Windows.Forms.ToolTipIcon]::Error
-      )
-    }
-  } elseif ($job.status -eq 'processing') {
-    Set-Status "Assemblage video..." ([System.Drawing.Color]::Khaki)
+  $jobsListView.EndUpdate()
+
+  Update-SelectedJobDetails
+
+  $activeJobs = @($jobs | Where-Object { $_.status -ne 'complete' -and $_.status -ne 'error' -and $_.status -ne 'cancelled' })
+  $failedJobs = @($jobs | Where-Object { $_.status -eq 'error' })
+  $completedJobs = @($jobs | Where-Object { $_.status -eq 'complete' })
+
+  if ($failedJobs.Count -gt 0) {
+    Set-Status "$($failedJobs.Count) erreur(s)" ([System.Drawing.Color]::LightCoral)
+  } elseif ($activeJobs.Count -gt 0) {
+    Set-Status "$($activeJobs.Count) telechargement(s)..." ([System.Drawing.Color]::Khaki)
+  } elseif ($completedJobs.Count -gt 0) {
+    Set-Status "Telechargements termines" ([System.Drawing.Color]::LightGreen)
   } else {
-    Set-Status "Telechargement..." ([System.Drawing.Color]::Khaki)
+    Set-Status "Pret" ([System.Drawing.Color]::LightGreen)
+  }
+
+  foreach ($job in $jobs) {
+    if ($job.status -eq 'complete') {
+      $notificationKey = "$($job.id):complete"
+
+      if (-not $script:jobNotifications.ContainsKey($notificationKey)) {
+        $script:jobNotifications[$notificationKey] = $true
+        $notifyIcon.ShowBalloonTip(
+          1800,
+          'Video Playback Helper',
+          "$($job.label) termine.",
+          [System.Windows.Forms.ToolTipIcon]::Info
+        )
+      }
+    } elseif ($job.status -eq 'error') {
+      $notificationKey = "$($job.id):error"
+
+      if (-not $script:jobNotifications.ContainsKey($notificationKey)) {
+        $script:jobNotifications[$notificationKey] = $true
+        $notifyIcon.ShowBalloonTip(
+          2200,
+          'Video Playback Helper',
+          "$($job.label) a echoue.",
+          [System.Windows.Forms.ToolTipIcon]::Error
+        )
+      }
+    }
   }
 }
 
@@ -206,8 +300,8 @@ function Place-BottomRight {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Video Playback Helper'
-$form.Width = 310
-$form.Height = 230
+$form.Width = 620
+$form.Height = 430
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedSingle
 $form.MaximizeBox = $false
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
@@ -245,11 +339,20 @@ $stopButton.Enabled = $false
 $stopButton.Add_Click({ Stop-Helper })
 $form.Controls.Add($stopButton)
 
+$stopSelectedButton = New-Object System.Windows.Forms.Button
+$stopSelectedButton.Text = 'Arreter DL'
+$stopSelectedButton.Width = 82
+$stopSelectedButton.Height = 28
+$stopSelectedButton.Location = New-Object System.Drawing.Point(198, 86)
+$stopSelectedButton.Enabled = $false
+$stopSelectedButton.Add_Click({ Stop-SelectedJob })
+$form.Controls.Add($stopSelectedButton)
+
 $downloadsButton = New-Object System.Windows.Forms.Button
 $downloadsButton.Text = 'Downloads'
 $downloadsButton.Width = 82
 $downloadsButton.Height = 28
-$downloadsButton.Location = New-Object System.Drawing.Point(198, 86)
+$downloadsButton.Location = New-Object System.Drawing.Point(288, 86)
 $downloadsButton.Add_Click({ Start-Process $downloads })
 $form.Controls.Add($downloadsButton)
 
@@ -260,31 +363,33 @@ $hintLabel.ForeColor = [System.Drawing.Color]::Silver
 $hintLabel.Location = New-Object System.Drawing.Point(18, 122)
 $form.Controls.Add($hintLabel)
 
-$jobLabel = New-Object System.Windows.Forms.Label
-$jobLabel.Text = 'Aucun telechargement'
-$jobLabel.AutoEllipsis = $true
-$jobLabel.Width = 262
-$jobLabel.Height = 18
-$jobLabel.Location = New-Object System.Drawing.Point(18, 148)
-$form.Controls.Add($jobLabel)
+$jobsListView = New-Object System.Windows.Forms.ListView
+$jobsListView.View = [System.Windows.Forms.View]::Details
+$jobsListView.FullRowSelect = $true
+$jobsListView.GridLines = $false
+$jobsListView.Width = 574
+$jobsListView.Height = 150
+$jobsListView.Location = New-Object System.Drawing.Point(18, 148)
+$jobsListView.BackColor = [System.Drawing.Color]::FromArgb(28, 31, 38)
+$jobsListView.ForeColor = [System.Drawing.Color]::White
+$jobsListView.Columns.Add('Telechargement', 190) | Out-Null
+$jobsListView.Columns.Add('%', 48) | Out-Null
+$jobsListView.Columns.Add('Vitesse', 82) | Out-Null
+$jobsListView.Columns.Add('Message', 248) | Out-Null
+$jobsListView.Columns.Add('Status', 0) | Out-Null
+$jobsListView.Add_SelectedIndexChanged({ Update-SelectedJobDetails })
+$form.Controls.Add($jobsListView)
 
-$progressBar = New-Object System.Windows.Forms.ProgressBar
-$progressBar.Width = 262
-$progressBar.Height = 10
-$progressBar.Minimum = 0
-$progressBar.Maximum = 100
-$progressBar.Value = 0
-$progressBar.Location = New-Object System.Drawing.Point(18, 170)
-$form.Controls.Add($progressBar)
-
-$jobMessageLabel = New-Object System.Windows.Forms.Label
-$jobMessageLabel.Text = ''
-$jobMessageLabel.AutoEllipsis = $true
-$jobMessageLabel.Width = 262
-$jobMessageLabel.Height = 18
-$jobMessageLabel.ForeColor = [System.Drawing.Color]::Silver
-$jobMessageLabel.Location = New-Object System.Drawing.Point(18, 186)
-$form.Controls.Add($jobMessageLabel)
+$jobDetailsTextBox = New-Object System.Windows.Forms.TextBox
+$jobDetailsTextBox.Multiline = $true
+$jobDetailsTextBox.ReadOnly = $true
+$jobDetailsTextBox.ScrollBars = [System.Windows.Forms.ScrollBars]::Vertical
+$jobDetailsTextBox.Width = 574
+$jobDetailsTextBox.Height = 64
+$jobDetailsTextBox.Location = New-Object System.Drawing.Point(18, 306)
+$jobDetailsTextBox.BackColor = [System.Drawing.Color]::FromArgb(28, 31, 38)
+$jobDetailsTextBox.ForeColor = [System.Drawing.Color]::White
+$form.Controls.Add($jobDetailsTextBox)
 
 $contextMenu = New-Object System.Windows.Forms.ContextMenuStrip
 $showItem = $contextMenu.Items.Add('Afficher')
@@ -352,6 +457,10 @@ $form.Add_FormClosing({
 $form.Add_FormClosed({
   $timer.Stop()
   $timer.Dispose()
+  if ($script:singleInstanceMutex) {
+    $script:singleInstanceMutex.ReleaseMutex()
+    $script:singleInstanceMutex.Dispose()
+  }
 })
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
