@@ -13,6 +13,7 @@ import {
   PAUSE_PLAYER_ACTION,
   PLAY_PLAYER_ACTION,
   RESTART_PLAYER_ACTION,
+  GET_AUDIO_LEVEL,
   GET_DOWNLOAD_OPTIONS,
   REQUEST_DOWNLOAD_URL,
   SET_MEDIA_ATTRIBUTES,
@@ -27,6 +28,7 @@ import {
 } from '../../helpers';
 
 import logo from '../../assets/img/logo.png';
+import logoBase from '../../assets/img/logo-base.png';
 import '../../assets/img/icon34.png';
 import '../../assets/img/icon34-inactive.png';
 import './Popup.css';
@@ -71,13 +73,51 @@ type AudioTrack = {
   bitrate: number;
 };
 
+type AudioLevelResponse = {
+  ok?: boolean;
+  level?: number;
+  levels?: number[];
+  isPlaying?: boolean;
+  hasLiveMeter?: boolean;
+};
+
 const YTDLP_HELPER_URL = 'http://127.0.0.1:47829';
 const HELPER_FORMAT_TIMEOUT_MS = 4500;
 const YOUTUBE_FORMAT_TIMEOUT_MS = 20000;
 const CONTENT_OPTIONS_TIMEOUT_MS = 6000;
+const AUDIO_LEVEL_POLL_MS = 90;
 
 const clamp = (value: number, min: number, max: number) =>
   Math.min(Math.max(value, min), max);
+
+const getLogoBarHue = (level: number) => 184 - clamp(level, 0, 1) * 162;
+
+const getLogoBarLightness = (level: number) => 42 + clamp(level, 0, 1) * 18;
+
+const getLogoBarGlow = (level: number) => 0.35 + clamp(level, 0, 1) * 0.6;
+
+const LOGO_BARS = [
+  { angle: 0, height: 11, radius: 18, color: '#28f6df', glow: 'rgba(40, 246, 223, 0.9)', boost: 0.16 },
+  { angle: 18, height: 8, radius: 18, color: '#25efea', glow: 'rgba(37, 239, 234, 0.85)', boost: 0.04 },
+  { angle: 36, height: 9, radius: 18, color: '#1fe4f2', glow: 'rgba(31, 228, 242, 0.85)', boost: 0.1 },
+  { angle: 54, height: 7, radius: 18, color: '#18d6fb', glow: 'rgba(24, 214, 251, 0.8)', boost: 0.02 },
+  { angle: 72, height: 10, radius: 18, color: '#ff8a3d', glow: 'rgba(255, 138, 61, 0.9)', boost: 0.18 },
+  { angle: 90, height: 12, radius: 18, color: '#ff7147', glow: 'rgba(255, 113, 71, 0.95)', boost: 0.22 },
+  { angle: 108, height: 9, radius: 18, color: '#ff9550', glow: 'rgba(255, 149, 80, 0.85)', boost: 0.08 },
+  { angle: 126, height: 6, radius: 18, color: '#1ee6f1', glow: 'rgba(30, 230, 241, 0.8)', boost: 0.02 },
+  { angle: 144, height: 9, radius: 18, color: '#26f0e5', glow: 'rgba(38, 240, 229, 0.85)', boost: 0.14 },
+  { angle: 162, height: 7, radius: 18, color: '#23e8ed', glow: 'rgba(35, 232, 237, 0.8)', boost: 0.04 },
+  { angle: 180, height: 11, radius: 18, color: '#28f6df', glow: 'rgba(40, 246, 223, 0.9)', boost: 0.18 },
+  { angle: 198, height: 8, radius: 18, color: '#25efea', glow: 'rgba(37, 239, 234, 0.85)', boost: 0.06 },
+  { angle: 216, height: 10, radius: 18, color: '#1fe4f2', glow: 'rgba(31, 228, 242, 0.85)', boost: 0.12 },
+  { angle: 234, height: 7, radius: 18, color: '#18d6fb', glow: 'rgba(24, 214, 251, 0.8)', boost: 0.02 },
+  { angle: 252, height: 9, radius: 18, color: '#ff8a3d', glow: 'rgba(255, 138, 61, 0.85)', boost: 0.12 },
+  { angle: 270, height: 12, radius: 18, color: '#22f1e6', glow: 'rgba(34, 241, 230, 0.95)', boost: 0.22 },
+  { angle: 288, height: 8, radius: 18, color: '#20e8ef', glow: 'rgba(32, 232, 239, 0.85)', boost: 0.06 },
+  { angle: 306, height: 10, radius: 18, color: '#28f6df', glow: 'rgba(40, 246, 223, 0.9)', boost: 0.16 },
+  { angle: 324, height: 7, radius: 18, color: '#1dddf5', glow: 'rgba(29, 221, 245, 0.8)', boost: 0.04 },
+  { angle: 342, height: 9, radius: 18, color: '#25efea', glow: 'rgba(37, 239, 234, 0.85)', boost: 0.1 },
+];
 
 const formatPlaybackRate = (value: number) =>
   value.toFixed(2).replace(/\.?0+$/, '');
@@ -317,6 +357,9 @@ const Popup: React.FC = () => {
   const [isStartingDownload, setIsStartingDownload] = useState(false);
   const [downloadJobs, setDownloadJobs] = useState<DownloadJob[]>([]);
   const [areDownloadJobsVisible, setAreDownloadJobsVisible] = useState(true);
+  const [audioLevels, setAudioLevels] = useState<number[]>(
+    LOGO_BARS.map(() => 0)
+  );
 
   const applyToSelectRef = useRef<HTMLSelectElement>(null);
 
@@ -403,6 +446,55 @@ const Popup: React.FC = () => {
 
   useEffect(() => {
     applyToSelectRef?.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const pollAudioLevel = async () => {
+      const tabs: any = await getTabsPromise(Tabs.Current);
+      const tabId = tabs?.[0]?.id;
+
+      if (!tabId) {
+        return;
+      }
+
+      chrome.tabs.sendMessage(
+        tabId,
+        { type: GET_AUDIO_LEVEL, payload: null },
+        (response: AudioLevelResponse) => {
+          if (!isMounted) {
+            return;
+          }
+
+          if (chrome.runtime.lastError) {
+            setAudioLevels(LOGO_BARS.map(() => 0));
+            return;
+          }
+
+          if (response?.ok) {
+            const nextLevels = response.levels?.length
+              ? response.levels
+              : LOGO_BARS.map(() => response.level ?? 0);
+
+            setAudioLevels(
+              LOGO_BARS.map((_, index) => clamp(nextLevels[index] ?? 0, 0, 1))
+            );
+            return;
+          }
+
+          setAudioLevels(LOGO_BARS.map(() => 0));
+        }
+      );
+    };
+
+    pollAudioLevel();
+    const intervalId = window.setInterval(pollAudioLevel, AUDIO_LEVEL_POLL_MS);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(intervalId);
+    };
   }, []);
 
   useEffect(() => {
@@ -772,7 +864,39 @@ const Popup: React.FC = () => {
     <div className="App">
       <header className="App-header">
         <div className="u-flex u-ai-center">
-          <img src={logo} className="App-logo" alt="logo" />
+          <div className="App-logo" aria-hidden="true">
+            <img src={logoBase || logo} className="App-logo-base" alt="" />
+            <div className="App-logo-bars">
+              {LOGO_BARS.map((bar, index) => (
+                <span
+                  className="App-logo-bar"
+                  key={index}
+                  style={
+                    {
+                      '--bar-index': index,
+                      '--bar-angle': `${bar.angle}deg`,
+                      '--bar-height': `${bar.height}px`,
+                      '--bar-radius': `${bar.radius}px`,
+                      '--bar-offset': `${bar.height / -2}px`,
+                      '--bar-color': bar.color,
+                      '--bar-glow': bar.glow,
+                      '--bar-boost': bar.boost,
+                      '--bar-level': audioLevels[index] ?? 0,
+                      '--bar-hue': getLogoBarHue(audioLevels[index] ?? 0),
+                      '--bar-lightness': `${getLogoBarLightness(
+                        audioLevels[index] ?? 0
+                      )}%`,
+                      '--bar-glow-alpha': getLogoBarGlow(
+                        audioLevels[index] ?? 0
+                      ),
+                    } as React.CSSProperties
+                  }
+                >
+                  <i />
+                </span>
+              ))}
+            </div>
+          </div>
           <div className="u-flex u-flex-direction-column">
             <h1 className="App-title">Video Playback</h1>
           </div>

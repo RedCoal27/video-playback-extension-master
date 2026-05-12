@@ -8,15 +8,54 @@
 }
 
 .App-logo {
+  position: relative;
+  flex: 0 0 52px;
+  width: 52px;
   height: 52px;
-  pointer-events: none;
   margin-right: 10px;
+  pointer-events: none;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 60s linear;
-  }
+.App-logo-base {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 52px;
+  height: 52px;
+}
+
+.App-logo-bars {
+  position: absolute;
+  inset: 0;
+}
+
+.App-logo-bar {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: var(--bar-height);
+  margin-left: -1.5px;
+  margin-top: var(--bar-offset);
+  transform: rotate(var(--bar-angle)) translateY(calc(var(--bar-radius) * -1));
+  transform-origin: 50% 50%;
+}
+
+.App-logo-bar i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: hsl(var(--bar-hue), 92%, var(--bar-lightness));
+  box-shadow: 0 0 calc(3px + var(--bar-level) * 7px)
+    hsla(var(--bar-hue), 96%, 58%, var(--bar-glow-alpha));
+  transform: scaleY(
+    calc(0.12 + var(--bar-level) * (1 + var(--bar-boost)))
+  );
+  transform-origin: 50% 50%;
+  transition: background 85ms linear, box-shadow 85ms linear,
+    transform 85ms linear, filter 85ms linear;
+  filter: brightness(calc(0.8 + var(--bar-level) * 0.65));
 }
 
 .App-header {
@@ -326,13 +365,4 @@ button {
 
 .u-text-align-left {
   text-align: left;
-}
-
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
 }

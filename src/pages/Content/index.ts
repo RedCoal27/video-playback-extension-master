@@ -7,6 +7,7 @@ import {
   setStorageFromDOMState,
   downloadMedia,
   getDownloadOptions,
+  getAudioLevel,
 } from './modules';
 import { Message, PlayerState } from '../../types';
 import {
@@ -19,6 +20,7 @@ import {
   RESTART_PLAYER_ACTION,
   DOWNLOAD_MEDIA,
   GET_DOWNLOAD_OPTIONS,
+  GET_AUDIO_LEVEL,
   DISABLE_EXTENSION,
   ENABLE_EXTENSION,
   SHORTCUT_DECREASE_PLAYBACK_RATE,
@@ -454,6 +456,11 @@ const handleMessage = (
       });
 
     return true;
+  }
+
+  if (message.type === GET_AUDIO_LEVEL) {
+    sendResponse(getAudioLevel());
+    return false;
   }
 
   switch (message.type) {

@@ -5,3 +5,4 @@ export { setVideoTheaterMode } from './setVideoTheaterMode';
 export { setCurrentTime } from './setCurrentTime';
 export { setStorageFromDOMState } from './setStorageFromDOMState';
 export { downloadMedia, getDownloadOptions } from './downloadMedia';
+export { getAudioLevel } from './getAudioLevel';

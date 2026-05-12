@@ -14,6 +14,7 @@ export const RESTART_PLAYER_ACTION = 'RESTART_PLAYER_ACTION';
 export const DOWNLOAD_MEDIA = 'DOWNLOAD_MEDIA';
 export const GET_DOWNLOAD_OPTIONS = 'GET_DOWNLOAD_OPTIONS';
 export const REQUEST_DOWNLOAD_URL = 'REQUEST_DOWNLOAD_URL';
+export const GET_AUDIO_LEVEL = 'GET_AUDIO_LEVEL';
 
 // shortcut commands
 export const SHORTCUT_DECREASE_PLAYBACK_RATE = 'decrease-playback-rate';
