@@ -35,7 +35,7 @@ export const setCurrentTime = async (skipInterval: number): Promise<any> => {
         _setCurrentTime(skipInterval, media);
       }
     } catch (error) {
-      console.error('Error trying to access iframe media: ', error);
+      // Cross-origin/sandboxed frames are expected on modern video pages.
     }
   }
 };

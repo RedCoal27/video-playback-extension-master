@@ -15,6 +15,31 @@ const LOCAL_FFMPEG = path.join(LOCAL_FFMPEG_DIR, 'ffmpeg.exe');
 const LOCAL_ARIA2C = path.join(__dirname, '..', 'tools', 'aria2', 'aria2c.exe');
 const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
+const YOUTUBE_EXTRACTOR_ARGS = [
+  '--js-runtimes',
+  'node',
+  '--extractor-args',
+  'youtube:player_client=all',
+];
+const FFMPEG_LANGUAGE_CODES = {
+  ar: 'ara',
+  bn: 'ben',
+  de: 'deu',
+  en: 'eng',
+  es: 'spa',
+  fr: 'fra',
+  hi: 'hin',
+  id: 'ind',
+  ja: 'jpn',
+  ko: 'kor',
+  pt: 'por',
+  ru: 'rus',
+  th: 'tha',
+  tr: 'tur',
+  zh: 'chi',
+  'zh-hans': 'chi',
+  'zh-hant': 'chi',
+};
 
 let cachedYtDlp = null;
 let latestJobId = null;
@@ -178,6 +203,19 @@ const killAria2cProcesses = () => {
     stdio: 'ignore',
   });
 };
+
+const isYouTubeUrl = (value = '') => {
+  try {
+    const host = new URL(value).hostname.toLowerCase();
+
+    return host.includes('youtube.com') || host === 'youtu.be';
+  } catch (error) {
+    return false;
+  }
+};
+
+const getExtractorArgs = (pageUrl = '') =>
+  isYouTubeUrl(pageUrl) ? YOUTUBE_EXTRACTOR_ARGS : [];
 
 const parseYtDlpLine = (line) => {
   const normalizedLine = line.replace(/\s+/g, ' ').trim();
@@ -495,6 +533,13 @@ const sanitizeText = (value) =>
     .replace(/\s+/g, ' ')
     .trim();
 
+const sanitizeMetadataToken = (value) =>
+  sanitizeText(value)
+    .replace(/[^a-z0-9._-]+/gi, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 80);
+
 const sanitizeFilename = (value) =>
   String(value || '')
     .replace(/[\\/:*?"<>|]+/g, ' ')
@@ -593,6 +638,64 @@ const getProbeSize = (targetUrl, referer = '', method = 'HEAD', redirectCount = 
 
 const formatDetail = (parts) => parts.filter(Boolean).join(' - ');
 
+const getLanguageKey = (format) => {
+  const track = format.audio_track || {};
+  const value =
+    format.language ||
+    track.id ||
+    track.lang ||
+    track.languageCode ||
+    track.language ||
+    track.displayName ||
+    track.name ||
+    format.format_note ||
+    'audio';
+
+  return String(value).trim();
+};
+
+const getFfmpegLanguageCode = (track) => {
+  const rawLanguage = String(track?.language || '').trim().toLowerCase();
+  const normalized = rawLanguage.replace(/_/g, '-');
+  const base = normalized.split('-')[0];
+
+  if (FFMPEG_LANGUAGE_CODES[normalized]) {
+    return FFMPEG_LANGUAGE_CODES[normalized];
+  }
+
+  if (FFMPEG_LANGUAGE_CODES[base]) {
+    return FFMPEG_LANGUAGE_CODES[base];
+  }
+
+  if (/^[a-z]{2,3}$/.test(base)) {
+    return base;
+  }
+
+  return 'und';
+};
+
+const getAudioMetadataArgs = (audioTracks) => {
+  if (!Array.isArray(audioTracks) || audioTracks.length < 2) {
+    return [];
+  }
+
+  const ffmpegArgs = audioTracks.flatMap((track, index) => {
+    const language = getFfmpegLanguageCode(track);
+    const title = sanitizeMetadataToken(track?.label || track?.language || `Audio-${index + 1}`);
+
+    return [
+      `-metadata:s:a:${index}`,
+      `language=${language}`,
+      ...(title ? [`-metadata:s:a:${index}`, `title=${title}`] : []),
+    ];
+  });
+
+  return [
+    '--postprocessor-args',
+    `Merger+ffmpeg_o:${ffmpegArgs.join(' ')}`,
+  ];
+};
+
 const getHeaderArgs = (referer) => {
   const args = [
     '--user-agent',
@@ -671,7 +774,7 @@ const buildOptions = (info, pageUrl) => {
     .sort((a, b) => b - a);
   const audioTracks = getAudioTracks(formats);
   const audioIds = audioTracks.map((track) => track.formatId);
-  const shouldMergeAllAudio = pageUrl.includes('youtube.com/') || pageUrl.includes('youtu.be/');
+  const shouldMergeAllAudio = isYouTubeUrl(pageUrl);
   const audioSelector = audioIds.length > 1
     ? audioIds.join('+')
     : 'ba[ext=m4a]';
@@ -687,10 +790,12 @@ const buildOptions = (info, pageUrl) => {
       ext === 'best'
         ? `bv*[height<=${height}]`
         : `bv*[height<=${height}][ext=${ext}]`;
+    const explicitAudioSelector = audioIds.length > 1 ? audioIds.join('+') : fallbackAudioSelector;
     const formatId = shouldMergeAllAudio
       ? [
-          `${videoSelector}+mergeall[vcodec=none][acodec^=opus][abr>64]`,
-          `${videoSelector}+mergeall[vcodec=none][acodec^=mp4a][abr>64]`,
+          `${videoSelector}+${explicitAudioSelector}`,
+          `${videoSelector}+mergeall[vcodec=none][abr>48]`,
+          `${videoSelector}+mergeall[vcodec=none]`,
           `${videoSelector}+${fallbackAudioSelector}`,
           `b[height<=${height}]`,
         ].join('/')
@@ -719,26 +824,28 @@ const buildOptions = (info, pageUrl) => {
     });
   });
 
-  combinedFormats
-    .sort((a, b) => (b.height || 0) - (a.height || 0))
-    .slice(0, 6)
-    .forEach((format) => {
-      options.push({
-        id: `yt-direct-${format.format_id}`,
-        source: 'companion',
-        formatId: format.format_id,
-        pageUrl,
-        label: `${format.height}p direct`,
-        detail: formatDetail([
-          'video+audio',
-          (format.ext || '').toUpperCase(),
-          formatBytes(format.filesize || format.filesize_approx),
-        ]),
-        sizeBytes: format.filesize || format.filesize_approx || undefined,
-        audioTracks,
-        includesAllAudioTracks: false,
+  if (!shouldMergeAllAudio || audioIds.length <= 1) {
+    combinedFormats
+      .sort((a, b) => (b.height || 0) - (a.height || 0))
+      .slice(0, 6)
+      .forEach((format) => {
+        options.push({
+          id: `yt-direct-${format.format_id}`,
+          source: 'companion',
+          formatId: format.format_id,
+          pageUrl,
+          label: `${format.height}p direct`,
+          detail: formatDetail([
+            'video+audio',
+            (format.ext || '').toUpperCase(),
+            formatBytes(format.filesize || format.filesize_approx),
+          ]),
+          sizeBytes: format.filesize || format.filesize_approx || undefined,
+          audioTracks,
+          includesAllAudioTracks: false,
+        });
       });
-    });
+  }
 
   if (!options.length) {
     const isLive = info.is_live || info.was_live;
@@ -776,16 +883,7 @@ const getAudioTracks = (formats) => {
     )
     .forEach((format) => {
       const track = format.audio_track || {};
-      const language =
-        format.language ||
-        track.id ||
-        track.lang ||
-        track.languageCode ||
-        track.language ||
-        track.displayName ||
-        track.name ||
-        format.format_note ||
-        'audio';
+      const language = getLanguageKey(format);
       const label = sanitizeText(
         track.displayName ||
           track.name ||
@@ -794,13 +892,16 @@ const getAudioTracks = (formats) => {
           format.format_note ||
           'Audio'
       );
-      const key = `${track.id || track.lang || track.languageCode || language}`.toLowerCase();
+      const key = language.toLowerCase();
       const existing = byLanguage.get(key);
       const bitrate = format.abr || format.tbr || 0;
+      const formatDescription = `${format.format_id} ${format.format} ${format.format_note} ${label}`;
+      const isDrc = /\bdrc\b|-drc\b|drc=1/i.test(formatDescription);
       const score =
         bitrate +
-        (format.ext === 'm4a' ? 2 : 0) +
-        (/original/i.test(`${format.format_note} ${label}`) ? 1 : 0);
+        (format.ext === 'm4a' ? 20 : 0) +
+        (/original/i.test(`${format.format_note} ${label}`) ? 10 : 0) -
+        (isDrc ? 1000 : 0);
 
       if (!existing || score > existing.score) {
         byLanguage.set(key, {
@@ -833,6 +934,7 @@ const handleFormats = async (request, response, url) => {
       '--dump-single-json',
       '--no-playlist',
       '--no-warnings',
+      ...getExtractorArgs(pageUrl),
       ...getHeaderArgs(referer),
       pageUrl,
     ], 15000);
@@ -857,6 +959,7 @@ const handleDownload = async (request, response) => {
     const body = JSON.parse((await getRequestBody(request)) || '{}');
     const pageUrl = body.url;
     const formatId = body.formatId;
+    const audioTracks = Array.isArray(body.audioTracks) ? body.audioTracks : [];
     const referer = typeof body.referer === 'string' ? body.referer : '';
     const requestedFilename = sanitizeFilename(body.filename || '');
     const label = sanitizeText(requestedFilename || body.label || 'Media download');
@@ -877,6 +980,7 @@ const handleDownload = async (request, response) => {
       '--no-playlist',
       '--continue',
       '--audio-multistreams',
+      ...getExtractorArgs(pageUrl),
       ...getHeaderArgs(referer),
       ...getDownloadSpeedArgs(formatId, useExternalDownloader),
       ...(formatId === 'direct' ? ['--add-header', 'Range: bytes=0-'] : []),
@@ -885,6 +989,9 @@ const handleDownload = async (request, response) => {
         : []),
       ...(shouldSelectFormat ? ['-f', formatId] : []),
       ...(shouldSelectFormat ? ['--merge-output-format', mergeOutputFormat] : []),
+      ...(shouldSelectFormat && mergeOutputFormat === 'mkv'
+        ? getAudioMetadataArgs(audioTracks)
+        : []),
       '--paths',
       `home:${DOWNLOAD_DIR}`,
       '--paths',

@@ -41,9 +41,7 @@
   "manifest_version": 3,
   "permissions": [
     "storage",
-    "downloads",
-    "scripting",
-    "webNavigation"
+    "downloads"
   ],
   "host_permissions": [
     "http://*/*",

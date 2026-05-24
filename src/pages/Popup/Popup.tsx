@@ -312,6 +312,7 @@ const requestYouTubeDownload = async (option: DownloadOption) => {
       filename: option.filename,
       referer: option.referer,
       mergeOutputFormat: option.mergeOutputFormat,
+      audioTracks: option.audioTracks,
     }),
   });
   const data = await response.json().catch(() => null);
@@ -362,6 +363,7 @@ const Popup: React.FC = () => {
   );
 
   const applyToSelectRef = useRef<HTMLSelectElement>(null);
+  const isAudioLevelRequestPendingRef = useRef(false);
 
   const sendMediaAttributeData = useCallback(
     async (
@@ -452,10 +454,16 @@ const Popup: React.FC = () => {
     let isMounted = true;
 
     const pollAudioLevel = async () => {
+      if (isAudioLevelRequestPendingRef.current) {
+        return;
+      }
+
+      isAudioLevelRequestPendingRef.current = true;
       const tabs: any = await getTabsPromise(Tabs.Current);
       const tabId = tabs?.[0]?.id;
 
       if (!tabId) {
+        isAudioLevelRequestPendingRef.current = false;
         return;
       }
 
@@ -463,6 +471,8 @@ const Popup: React.FC = () => {
         tabId,
         { type: GET_AUDIO_LEVEL, payload: null },
         (response: AudioLevelResponse) => {
+          isAudioLevelRequestPendingRef.current = false;
+
           if (!isMounted) {
             return;
           }

@@ -1,11 +1,13 @@
 import { getDataFromSyncStoragePromise } from '../../../helpers';
 
 type BoostedMedia = {
-  gainNode: GainNode;
-  audioContext: AudioContext;
+  gainNode?: GainNode;
+  audioContext?: AudioContext;
+  baselineVolume: number;
+  lastFactor: number;
 };
 
-const boostedMedias = new WeakMap<HTMLMediaElement, BoostedMedia>();
+const mediaVolumeStates = new WeakMap<HTMLMediaElement, BoostedMedia>();
 
 const isSafeToBoostVolume = (media: HTMLMediaElement): boolean => {
   const mediaUrl = media.currentSrc || media.src;
@@ -64,46 +66,91 @@ export const setMediaVolume = async (
 };
 
 const _setMediaVolume = (volume: number, media: HTMLMediaElement) => {
-  const nativeVolume = Math.min(volume, 1);
+  const volumeState = getVolumeState(media);
 
-  if (media.volume !== nativeVolume) {
-    media.volume = nativeVolume;
+  if (volumeState.lastFactor === 1 && volume !== 1) {
+    volumeState.baselineVolume = media.volume;
+  }
+
+  if (volume === 1) {
+    if (volumeState.gainNode) {
+      volumeState.gainNode.gain.value = 1;
+    }
+
+    if (volumeState.lastFactor !== 1) {
+      media.volume = volumeState.baselineVolume;
+    } else {
+      volumeState.baselineVolume = media.volume;
+    }
+
+    volumeState.lastFactor = volume;
+    return;
   }
 
   if (volume <= 1) {
-    const boostedMedia = boostedMedias.get(media);
+    const nativeVolume = Math.min(volumeState.baselineVolume * volume, 1);
 
-    if (boostedMedia) {
-      boostedMedia.gainNode.gain.value = 1;
+    if (media.volume !== nativeVolume) {
+      media.volume = nativeVolume;
     }
 
+    if (volumeState.gainNode) {
+      volumeState.gainNode.gain.value = 1;
+    }
+
+    volumeState.lastFactor = volume;
     return;
   }
 
   if (!isSafeToBoostVolume(media)) {
     // Boosting cross-origin media through Web Audio can mute playback on some
-    // sites. Keep the browser's native maximum volume instead of risking silence.
+    // sites. Fall back to the native slider without exceeding the browser max.
+    media.volume = Math.min(volumeState.baselineVolume * volume, 1);
+    volumeState.lastFactor = volume;
     return;
   }
 
-  const boostedMedia = getBoostedMedia(media);
+  if (media.volume !== volumeState.baselineVolume) {
+    media.volume = volumeState.baselineVolume;
+  }
 
-  if (!boostedMedia) {
+  const boostedMedia = getBoostedMedia(media, volumeState);
+
+  if (!boostedMedia?.gainNode || !boostedMedia.audioContext) {
     return;
   }
 
   boostedMedia.gainNode.gain.value = volume;
+  boostedMedia.lastFactor = volume;
 
   if (boostedMedia.audioContext.state === 'suspended') {
     boostedMedia.audioContext.resume();
   }
 };
 
-const getBoostedMedia = (media: HTMLMediaElement): BoostedMedia | null => {
-  const existingBoostedMedia = boostedMedias.get(media);
+const getVolumeState = (media: HTMLMediaElement): BoostedMedia => {
+  const existingState = mediaVolumeStates.get(media);
 
-  if (existingBoostedMedia) {
-    return existingBoostedMedia;
+  if (existingState) {
+    return existingState;
+  }
+
+  const volumeState = {
+    baselineVolume: media.volume,
+    lastFactor: 1,
+  };
+
+  mediaVolumeStates.set(media, volumeState);
+
+  return volumeState;
+};
+
+const getBoostedMedia = (
+  media: HTMLMediaElement,
+  volumeState: BoostedMedia
+): BoostedMedia | null => {
+  if (volumeState.gainNode && volumeState.audioContext) {
+    return volumeState;
   }
 
   const AudioContextConstructor =
@@ -117,11 +164,11 @@ const getBoostedMedia = (media: HTMLMediaElement): BoostedMedia | null => {
     const audioContext = new AudioContextConstructor();
     const source = audioContext.createMediaElementSource(media);
     const gainNode = audioContext.createGain();
-    const boostedMedia = { audioContext, gainNode };
 
     source.connect(gainNode);
     gainNode.connect(audioContext.destination);
-    boostedMedias.set(media, boostedMedia);
+    volumeState.audioContext = audioContext;
+    volumeState.gainNode = gainNode;
 
     media.addEventListener('play', () => {
       if (audioContext.state === 'suspended') {
@@ -129,7 +176,7 @@ const getBoostedMedia = (media: HTMLMediaElement): BoostedMedia | null => {
       }
     });
 
-    return boostedMedia;
+    return volumeState;
   } catch (error) {
     console.error('Error trying to boost media volume: ', error);
 

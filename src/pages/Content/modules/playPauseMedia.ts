@@ -37,7 +37,7 @@ export const playPauseMedia = (playerState: PlayerState) => {
         _playPauseMedia(playerState, media);
       }
     } catch (error) {
-      console.error('Error trying to access iframe media: ', error);
+      // Cross-origin/sandboxed frames are expected on modern video pages.
     }
   }
 };

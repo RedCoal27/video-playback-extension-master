@@ -42,7 +42,6 @@ const getMediaKey = (media: HTMLMediaElement, stream?: MediaStream) => {
 
   return [
     window.location.href,
-    document.title,
     media.currentSrc || media.src || window.location.href,
     media.duration || 0,
     trackKey,
@@ -51,7 +50,6 @@ const getMediaKey = (media: HTMLMediaElement, stream?: MediaStream) => {
 
 const destroyMeter = (meter: AudioMeter) => {
   try {
-    meter.stream.getTracks().forEach((track) => track.stop());
     meter.audioContext.close();
   } catch (error) {
     return;
@@ -66,7 +64,11 @@ const getMeter = (media: HTMLMediaElement): AudioMeter | null => {
       .getAudioTracks()
       .some((track) => track.readyState === 'live');
 
-    if (hasLiveTrack && existingMeter.key === getMediaKey(media, existingMeter.stream)) {
+    if (
+      hasLiveTrack &&
+      existingMeter.audioContext.state !== 'closed' &&
+      existingMeter.key === getMediaKey(media, existingMeter.stream)
+    ) {
       return existingMeter;
     }
 
@@ -163,7 +165,7 @@ const decibelsToLevel = (decibels: number, bandIndex: number) => {
 
 const readFrequencyLevels = (meter: AudioMeter) => {
   if (meter.audioContext.state === 'suspended') {
-    meter.audioContext.resume();
+    meter.audioContext.resume().catch(() => undefined);
   }
 
   meter.analyser.getFloatFrequencyData(meter.frequencyData);
