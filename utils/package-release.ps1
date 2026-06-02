@@ -109,32 +109,13 @@ try {
   @(
     'Video Playback Helper.exe',
     'Video Playback Helper.cmd',
-    'Video Playback Helper.vbs',
-    'utils\helper-ui.ps1',
-    'utils\helper-icon.ico',
-    'utils\install-ytdlp.js',
-    'utils\install-ffmpeg.js',
-    'utils\install-aria2.js',
-    'utils\ytdlp-server.js'
+    'Video Playback Helper.vbs'
   ) | ForEach-Object {
     Copy-RequiredItem (Join-Path $root $_) $releaseDir
   }
 
-  @'
-Video Playback release assets
-
-- video-playback-extension.crx: packaged Chrome/Brave extension.
-- Video Playback Helper.exe: standalone Windows helper. Run this directly.
-- helper scripts: standalone helper runtime files, also embedded in the exe.
-
-If you need a stable Chrome extension ID across releases, set the GitHub Actions
-secret CHROME_EXTENSION_PRIVATE_KEY_BASE64 to a base64-encoded Chrome extension
-private key before building releases.
-'@ | Set-Content -Path (Join-Path $releaseDir 'RELEASE-ASSETS.txt') -Encoding UTF8
-
   Write-Host "Created $extensionCrx"
   Write-Host "Created $(Join-Path $releaseDir 'Video Playback Helper.exe')"
-  Write-Host "Created standalone helper scripts in $releaseDir"
 } finally {
   Pop-Location
 }
