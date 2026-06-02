@@ -44,6 +44,8 @@ $resourceArgs = @(
   @resourceArgs `
   /reference:System.Windows.Forms.dll `
   /reference:System.Drawing.dll `
+  /reference:System.IO.Compression.dll `
+  /reference:System.IO.Compression.FileSystem.dll `
   /reference:System.Web.Extensions.dll `
   "$source"
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Reflection;
 using System.Text;
@@ -38,6 +39,9 @@ namespace VideoPlaybackHelperLauncher
         private const string AppName = "Video Playback Helper";
         private const string HealthUrl = "http://127.0.0.1:47829/health";
         private const string JobsUrl = "http://127.0.0.1:47829/jobs";
+        private const string NodeVersion = "v22.16.0";
+        private const string NodeArchiveName = "node-" + NodeVersion + "-win-x64.zip";
+        private const string NodeDownloadUrl = "https://nodejs.org/dist/" + NodeVersion + "/" + NodeArchiveName;
 
         private static readonly string RuntimeRoot = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -110,6 +114,11 @@ namespace VideoPlaybackHelperLauncher
         private static string RuntimePath(string relativePath)
         {
             return Path.Combine(RuntimeRoot, relativePath);
+        }
+
+        private static string LocalNodePath()
+        {
+            return RuntimePath("tools\\node\\node.exe");
         }
 
         private void PrepareRuntime()
@@ -336,7 +345,104 @@ namespace VideoPlaybackHelperLauncher
 
         private static bool HasNode()
         {
-            return RunProcess("node", "--version", RuntimeRoot, true) == 0;
+            try
+            {
+                return RunProcess(ResolveNodeExecutable(), "--version", RuntimeRoot, true) == 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string ResolveNodeExecutable()
+        {
+            string localNode = LocalNodePath();
+
+            if (File.Exists(localNode))
+            {
+                return localNode;
+            }
+
+            return "node";
+        }
+
+        private static void CopyDirectory(string sourceDirectory, string targetDirectory)
+        {
+            Directory.CreateDirectory(targetDirectory);
+
+            foreach (string file in Directory.GetFiles(sourceDirectory))
+            {
+                File.Copy(file, Path.Combine(targetDirectory, Path.GetFileName(file)), true);
+            }
+
+            foreach (string directory in Directory.GetDirectories(sourceDirectory))
+            {
+                CopyDirectory(directory, Path.Combine(targetDirectory, Path.GetFileName(directory)));
+            }
+        }
+
+        private bool EnsureNodeRuntime()
+        {
+            if (HasNode())
+            {
+                return true;
+            }
+
+            try
+            {
+                SetStatus("Installing portable Node.js...", Color.Khaki);
+
+                Directory.CreateDirectory(RuntimePath("tools"));
+                string tempDirectory = RuntimePath("tools\\node-download");
+                string archivePath = Path.Combine(tempDirectory, NodeArchiveName);
+
+                if (Directory.Exists(tempDirectory))
+                {
+                    Directory.Delete(tempDirectory, true);
+                }
+
+                Directory.CreateDirectory(tempDirectory);
+                ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072;
+
+                using (WebClient client = new WebClient())
+                {
+                    client.Headers.Add("User-Agent", AppName);
+                    client.DownloadFile(NodeDownloadUrl, archivePath);
+                }
+
+                ZipFile.ExtractToDirectory(archivePath, tempDirectory);
+                string[] nodeFiles = Directory.GetFiles(tempDirectory, "node.exe", SearchOption.AllDirectories);
+
+                if (nodeFiles.Length == 0)
+                {
+                    throw new FileNotFoundException("Portable node.exe was not found in the downloaded archive.");
+                }
+
+                string extractedNodeDirectory = Path.GetDirectoryName(nodeFiles[0]);
+                string localNodeDirectory = RuntimePath("tools\\node");
+
+                if (Directory.Exists(localNodeDirectory))
+                {
+                    Directory.Delete(localNodeDirectory, true);
+                }
+
+                CopyDirectory(extractedNodeDirectory, localNodeDirectory);
+                Directory.Delete(tempDirectory, true);
+
+                return File.Exists(LocalNodePath());
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show(
+                    "Unable to install portable Node.js automatically.\n\n" + error.Message,
+                    AppName,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error
+                );
+                SetStatus("Node.js install failed", Color.LightCoral);
+                return false;
+            }
         }
 
         private static int RunProcess(string fileName, string arguments, string workingDirectory, bool wait)
@@ -366,14 +472,8 @@ namespace VideoPlaybackHelperLauncher
 
         private bool EnsureTools()
         {
-            if (!HasNode())
+            if (!EnsureNodeRuntime())
             {
-                MessageBox.Show(
-                    "Node.js was not found. Install Node.js, then restart this helper.",
-                    AppName,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Error
-                );
                 return false;
             }
 
@@ -381,7 +481,7 @@ namespace VideoPlaybackHelperLauncher
             {
                 SetStatus("Installing yt-dlp...", Color.Khaki);
 
-                if (RunProcess("node", Quote(RuntimePath("utils\\install-ytdlp.js")), RuntimeRoot, true) != 0)
+                if (RunProcess(ResolveNodeExecutable(), Quote(RuntimePath("utils\\install-ytdlp.js")), RuntimeRoot, true) != 0)
                 {
                     SetStatus("yt-dlp could not be installed", Color.LightCoral);
                     return false;
@@ -392,7 +492,7 @@ namespace VideoPlaybackHelperLauncher
             {
                 SetStatus("Installing ffmpeg...", Color.Khaki);
 
-                if (RunProcess("node", Quote(RuntimePath("utils\\install-ffmpeg.js")), RuntimeRoot, true) != 0)
+                if (RunProcess(ResolveNodeExecutable(), Quote(RuntimePath("utils\\install-ffmpeg.js")), RuntimeRoot, true) != 0)
                 {
                     SetStatus("ffmpeg could not be installed", Color.LightCoral);
                     return false;
@@ -403,7 +503,7 @@ namespace VideoPlaybackHelperLauncher
             {
                 SetStatus("Installing aria2c...", Color.Khaki);
 
-                if (RunProcess("node", Quote(RuntimePath("utils\\install-aria2.js")), RuntimeRoot, true) != 0)
+                if (RunProcess(ResolveNodeExecutable(), Quote(RuntimePath("utils\\install-aria2.js")), RuntimeRoot, true) != 0)
                 {
                     SetStatus("aria2c unavailable, using standard mode", Color.Khaki);
                 }
@@ -475,7 +575,7 @@ namespace VideoPlaybackHelperLauncher
 
             ProcessStartInfo startInfo = new ProcessStartInfo
             {
-                FileName = "node",
+                FileName = ResolveNodeExecutable(),
                 Arguments = Quote(RuntimePath("utils\\ytdlp-server.js")),
                 WorkingDirectory = RuntimeRoot,
                 UseShellExecute = false,
