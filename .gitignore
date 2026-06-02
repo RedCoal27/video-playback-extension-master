@@ -9,6 +9,9 @@
 
 # production
 /build
+/dist
+/Video Playback Helper.exe
+/utils/helper-icon.ico
 
 # misc
 .DS_Store

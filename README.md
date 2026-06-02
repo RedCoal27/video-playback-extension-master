@@ -79,6 +79,40 @@ For downloads, click `Download Media`. The popup will show direct media choices 
 
 ## Development
 
+Build the extension locally:
+
+```powershell
+npm run build
+```
+
+Build the helper executable:
+
+```powershell
+npm run build:helper
+```
+
+Create local release archives:
+
+```powershell
+npm run package:release
+```
+
+This creates:
+
+- `dist/release/video-playback-extension.zip`
+- `dist/release/video-playback-helper-windows.zip`
+- `dist/release/video-playback-source.zip`
+
+## GitHub Releases
+
+Pushing a tag named `v*`, for example `v3.2.0`, automatically builds and publishes a GitHub release with:
+
+- the packed Chrome/Brave extension
+- the Windows helper package
+- a source archive
+
+You can also run the `Release` workflow manually from GitHub Actions and provide the target tag.
+
 Build the extension:
 
 ```powershell

@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to create or update, for example v3.2.0'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release assets
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+
+      - name: Package release assets
+        run: npm run package:release
+
+      - name: Resolve release tag
+        id: release_tag
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            "tag=${{ inputs.tag_name }}" >> $env:GITHUB_OUTPUT
+          } else {
+            "tag=${{ github.ref_name }}" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Create or update GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+        run: |
+          $releaseExists = gh release view $env:RELEASE_TAG 2>$null
+
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $env:RELEASE_TAG `
+              dist/release/video-playback-extension.zip `
+              dist/release/video-playback-helper-windows.zip `
+              dist/release/video-playback-source.zip `
+              --title "Video Playback $env:RELEASE_TAG" `
+              --generate-notes
+          } else {
+            gh release upload $env:RELEASE_TAG `
+              dist/release/video-playback-extension.zip `
+              dist/release/video-playback-helper-windows.zip `
+              dist/release/video-playback-source.zip `
+              --clobber
+          }

@@ -11,6 +11,7 @@
     "install:aria2": "node utils/install-aria2.js",
     "ytdlp-server": "node utils/ytdlp-server.js",
     "build:helper": "powershell -ExecutionPolicy Bypass -File utils/build-helper-exe.ps1",
+    "package:release": "powershell -ExecutionPolicy Bypass -File utils/package-release.ps1",
     "prettier": "prettier --write '**/*.{js,jsx,css,html}'"
   },
   "dependencies": {
