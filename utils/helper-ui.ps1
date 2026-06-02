@@ -6,6 +6,8 @@ $downloads = [Environment]::GetFolderPath('UserProfile') + '\Downloads'
 $ytDlp = Join-Path $root 'tools\yt-dlp.exe'
 $ffmpeg = Join-Path $root 'tools\ffmpeg\bin\ffmpeg.exe'
 $aria2c = Join-Path $root 'tools\aria2\aria2c.exe'
+$helperIconPath = Join-Path $root 'utils\helper-icon.ico'
+$helperIcon = $null
 $serverProcess = $null
 $isClosing = $false
 $jobNotifications = @{}
@@ -14,12 +16,16 @@ $singleInstanceMutex = New-Object System.Threading.Mutex($true, 'Global\VideoPla
 
 if (-not $createdNewInstance) {
   [System.Windows.Forms.MessageBox]::Show(
-    "Video Playback Helper est deja lance.",
+    "Video Playback Helper is already running.",
     "Video Playback Helper",
     [System.Windows.Forms.MessageBoxButtons]::OK,
     [System.Windows.Forms.MessageBoxIcon]::Information
   ) | Out-Null
   return
+}
+
+if (Test-Path $helperIconPath) {
+  $helperIcon = New-Object System.Drawing.Icon($helperIconPath)
 }
 
 function Set-Status {
@@ -54,7 +60,7 @@ function Run-NodeScript {
 function Ensure-Tools {
   if (-not (Test-Node)) {
     [System.Windows.Forms.MessageBox]::Show(
-      "Node.js est introuvable. Installe Node.js puis relance ce helper.",
+      "Node.js was not found. Install Node.js, then restart this helper.",
       "Video Playback Helper",
       [System.Windows.Forms.MessageBoxButtons]::OK,
       [System.Windows.Forms.MessageBoxIcon]::Error
@@ -63,25 +69,25 @@ function Ensure-Tools {
   }
 
   if (-not (Test-Path $ytDlp)) {
-    Set-Status "Installation de yt-dlp..." ([System.Drawing.Color]::Khaki)
+    Set-Status "Installing yt-dlp..." ([System.Drawing.Color]::Khaki)
     if (-not (Run-NodeScript (Join-Path $root 'utils\install-ytdlp.js'))) {
-      Set-Status "yt-dlp n'a pas pu etre installe" ([System.Drawing.Color]::LightCoral)
+      Set-Status "yt-dlp could not be installed" ([System.Drawing.Color]::LightCoral)
       return $false
     }
   }
 
   if (-not (Test-Path $ffmpeg)) {
-    Set-Status "Installation de ffmpeg..." ([System.Drawing.Color]::Khaki)
+    Set-Status "Installing ffmpeg..." ([System.Drawing.Color]::Khaki)
     if (-not (Run-NodeScript (Join-Path $root 'utils\install-ffmpeg.js'))) {
-      Set-Status "ffmpeg n'a pas pu etre installe" ([System.Drawing.Color]::LightCoral)
+      Set-Status "ffmpeg could not be installed" ([System.Drawing.Color]::LightCoral)
       return $false
     }
   }
 
   if (-not (Test-Path $aria2c)) {
-    Set-Status "Installation de aria2c..." ([System.Drawing.Color]::Khaki)
+    Set-Status "Installing aria2c..." ([System.Drawing.Color]::Khaki)
     if (-not (Run-NodeScript (Join-Path $root 'utils\install-aria2.js'))) {
-      Set-Status "aria2c indisponible, mode standard" ([System.Drawing.Color]::Khaki)
+      Set-Status "aria2c unavailable, using standard mode" ([System.Drawing.Color]::Khaki)
     }
   }
 
@@ -130,14 +136,14 @@ function Stop-SelectedJob {
     Invoke-RestMethod -Uri "http://127.0.0.1:47829/jobs/$jobId/$action" -Method Delete -TimeoutSec 2 | Out-Null
     Update-DownloadStatus
   } catch {
-    Set-Status "Action impossible" ([System.Drawing.Color]::LightCoral)
+    Set-Status "Action failed" ([System.Drawing.Color]::LightCoral)
   }
 }
 
 function Update-SelectedJobDetails {
   if (-not $jobsListView.SelectedItems -or $jobsListView.SelectedItems.Count -eq 0) {
     $jobDetailsTextBox.Text = ''
-    $stopSelectedButton.Text = 'Arreter DL'
+    $stopSelectedButton.Text = 'Stop DL'
     $stopSelectedButton.Enabled = $false
     return
   }
@@ -147,7 +153,7 @@ function Update-SelectedJobDetails {
   $isFinished = $jobStatus -eq 'complete' -or $jobStatus -eq 'error' -or $jobStatus -eq 'cancelled'
 
   $jobDetailsTextBox.Text = $selected.SubItems[3].Text
-  $stopSelectedButton.Text = if ($isFinished) { 'Supprimer' } else { 'Arreter DL' }
+  $stopSelectedButton.Text = if ($isFinished) { 'Delete' } else { 'Stop DL' }
   $stopSelectedButton.Enabled = $true
 }
 
@@ -196,13 +202,13 @@ function Update-DownloadStatus {
   $completedJobs = @($jobs | Where-Object { $_.status -eq 'complete' })
 
   if ($failedJobs.Count -gt 0) {
-    Set-Status "$($failedJobs.Count) erreur(s)" ([System.Drawing.Color]::LightCoral)
+    Set-Status "$($failedJobs.Count) error(s)" ([System.Drawing.Color]::LightCoral)
   } elseif ($activeJobs.Count -gt 0) {
-    Set-Status "$($activeJobs.Count) telechargement(s)..." ([System.Drawing.Color]::Khaki)
+    Set-Status "$($activeJobs.Count) download(s)..." ([System.Drawing.Color]::Khaki)
   } elseif ($completedJobs.Count -gt 0) {
-    Set-Status "Telechargements termines" ([System.Drawing.Color]::LightGreen)
+    Set-Status "Downloads complete" ([System.Drawing.Color]::LightGreen)
   } else {
-    Set-Status "Pret" ([System.Drawing.Color]::LightGreen)
+    Set-Status "Ready" ([System.Drawing.Color]::LightGreen)
   }
 
   foreach ($job in $jobs) {
@@ -214,7 +220,7 @@ function Update-DownloadStatus {
         $notifyIcon.ShowBalloonTip(
           1800,
           'Video Playback Helper',
-          "$($job.label) termine.",
+          "$($job.label) completed.",
           [System.Windows.Forms.ToolTipIcon]::Info
         )
       }
@@ -226,7 +232,7 @@ function Update-DownloadStatus {
         $notifyIcon.ShowBalloonTip(
           2200,
           'Video Playback Helper',
-          "$($job.label) a echoue.",
+          "$($job.label) failed.",
           [System.Windows.Forms.ToolTipIcon]::Error
         )
       }
@@ -236,7 +242,7 @@ function Update-DownloadStatus {
 
 function Start-Helper {
   if (Test-HelperAlive) {
-    Set-Status "Pret" ([System.Drawing.Color]::LightGreen)
+    Set-Status "Ready" ([System.Drawing.Color]::LightGreen)
     return
   }
 
@@ -244,7 +250,7 @@ function Start-Helper {
     return
   }
 
-  Set-Status "Demarrage..." ([System.Drawing.Color]::Khaki)
+  Set-Status "Starting..." ([System.Drawing.Color]::Khaki)
 
   $script = Join-Path $root 'utils\ytdlp-server.js'
   $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -258,9 +264,9 @@ function Start-Helper {
   Start-Sleep -Milliseconds 800
 
   if (Test-HelperAlive) {
-    Set-Status "Pret" ([System.Drawing.Color]::LightGreen)
+    Set-Status "Ready" ([System.Drawing.Color]::LightGreen)
   } else {
-    Set-Status "Erreur au demarrage" ([System.Drawing.Color]::LightCoral)
+    Set-Status "Startup error" ([System.Drawing.Color]::LightCoral)
   }
 }
 
@@ -277,7 +283,7 @@ function Stop-Helper {
   }
 
   $script:serverProcess = $null
-  Set-Status "Arrete" ([System.Drawing.Color]::Gainsboro)
+  Set-Status "Stopped" ([System.Drawing.Color]::Gainsboro)
 }
 
 function Place-BottomRight {
@@ -298,6 +304,9 @@ $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
 $form.BackColor = [System.Drawing.Color]::FromArgb(35, 39, 48)
 $form.ForeColor = [System.Drawing.Color]::White
 $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
+if ($helperIcon) {
+  $form.Icon = $helperIcon
+}
 
 $titleLabel = New-Object System.Windows.Forms.Label
 $titleLabel.Text = 'Video Playback Helper'
@@ -307,13 +316,13 @@ $titleLabel.Location = New-Object System.Drawing.Point(16, 14)
 $form.Controls.Add($titleLabel)
 
 $statusLabel = New-Object System.Windows.Forms.Label
-$statusLabel.Text = 'Initialisation...'
+$statusLabel.Text = 'Initializing...'
 $statusLabel.AutoSize = $true
 $statusLabel.Location = New-Object System.Drawing.Point(18, 48)
 $form.Controls.Add($statusLabel)
 
 $stopSelectedButton = New-Object System.Windows.Forms.Button
-$stopSelectedButton.Text = 'Arreter DL'
+$stopSelectedButton.Text = 'Stop DL'
 $stopSelectedButton.Width = 82
 $stopSelectedButton.Height = 28
 $stopSelectedButton.Location = New-Object System.Drawing.Point(18, 86)
@@ -330,7 +339,7 @@ $downloadsButton.Add_Click({ Start-Process $downloads })
 $form.Controls.Add($downloadsButton)
 
 $hintLabel = New-Object System.Windows.Forms.Label
-$hintLabel.Text = 'Reduire pour garder le helper en bas a droite.'
+$hintLabel.Text = 'Minimize to keep the helper in the bottom-right corner.'
 $hintLabel.AutoSize = $true
 $hintLabel.ForeColor = [System.Drawing.Color]::Silver
 $hintLabel.Location = New-Object System.Drawing.Point(18, 122)
@@ -345,9 +354,9 @@ $jobsListView.Height = 150
 $jobsListView.Location = New-Object System.Drawing.Point(18, 148)
 $jobsListView.BackColor = [System.Drawing.Color]::FromArgb(28, 31, 38)
 $jobsListView.ForeColor = [System.Drawing.Color]::White
-$jobsListView.Columns.Add('Telechargement', 190) | Out-Null
+$jobsListView.Columns.Add('Download', 190) | Out-Null
 $jobsListView.Columns.Add('%', 48) | Out-Null
-$jobsListView.Columns.Add('Vitesse', 82) | Out-Null
+$jobsListView.Columns.Add('Speed', 82) | Out-Null
 $jobsListView.Columns.Add('Message', 248) | Out-Null
 $jobsListView.Columns.Add('Status', 0) | Out-Null
 $jobsListView.Add_SelectedIndexChanged({ Update-SelectedJobDetails })
@@ -365,16 +374,16 @@ $jobDetailsTextBox.ForeColor = [System.Drawing.Color]::White
 $form.Controls.Add($jobDetailsTextBox)
 
 $contextMenu = New-Object System.Windows.Forms.ContextMenuStrip
-$showItem = $contextMenu.Items.Add('Afficher')
+$showItem = $contextMenu.Items.Add('Show')
 $showItem.Add_Click({
   $form.Show()
   $form.WindowState = [System.Windows.Forms.FormWindowState]::Normal
   Place-BottomRight
 })
-$openDownloadsItem = $contextMenu.Items.Add('Ouvrir les telechargements')
+$openDownloadsItem = $contextMenu.Items.Add('Open downloads')
 $openDownloadsItem.Add_Click({ Start-Process $downloads })
 $contextMenu.Items.Add('-') | Out-Null
-$exitItem = $contextMenu.Items.Add('Quitter')
+$exitItem = $contextMenu.Items.Add('Exit')
 $exitItem.Add_Click({
   $script:isClosing = $true
   Stop-Helper
@@ -383,7 +392,7 @@ $exitItem.Add_Click({
 })
 
 $notifyIcon = New-Object System.Windows.Forms.NotifyIcon
-$notifyIcon.Icon = [System.Drawing.SystemIcons]::Application
+$notifyIcon.Icon = if ($helperIcon) { $helperIcon } else { [System.Drawing.SystemIcons]::Application }
 $notifyIcon.Visible = $true
 $notifyIcon.Text = 'Video Playback Helper'
 $notifyIcon.ContextMenuStrip = $contextMenu
@@ -409,7 +418,7 @@ $form.Add_Resize({
     $notifyIcon.ShowBalloonTip(
       1200,
       'Video Playback Helper',
-      'Le helper continue en arriere-plan.',
+      'The helper is still running in the background.',
       [System.Windows.Forms.ToolTipIcon]::Info
     )
   }
@@ -428,6 +437,9 @@ $form.Add_FormClosed({
   if ($script:singleInstanceMutex) {
     $script:singleInstanceMutex.ReleaseMutex()
     $script:singleInstanceMutex.Dispose()
+  }
+  if ($script:helperIcon) {
+    $script:helperIcon.Dispose()
   }
 })
 
