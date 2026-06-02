@@ -68,6 +68,11 @@ const isKnownNonMediaUrl = (value: string) =>
     value
   );
 
+const isKnownPageAssetUrl = (value: string) =>
+  /\.(webmanifest|json|js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|map)(?:[?#]|$)/i.test(
+    value
+  );
+
 const isStreamUrl = (value: string) => {
   if (isKnownNonMediaUrl(value)) {
     return false;
@@ -93,6 +98,45 @@ const getAbsoluteUrl = (value: string) => {
 };
 
 const getCompanionReferer = () => document.referrer || window.location.href;
+
+const decodeHtmlAttribute = (value: string) =>
+  value
+    .replace(/\\+$/g, '')
+    .replace(/\\\//g, '/')
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&#038;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+const isLikelyEmbeddedPlayerUrl = (value: string) => {
+  if (!value || isKnownPageAssetUrl(value)) {
+    return false;
+  }
+
+  try {
+    const url = new URL(value, window.location.href);
+    const host = url.hostname.toLowerCase();
+    const path = `${url.pathname}${url.search}`.toLowerCase();
+    const currentHost = window.location.hostname.toLowerCase();
+
+    if (!/^https?:$/.test(url.protocol) || host === currentHost) {
+      return false;
+    }
+
+    return (
+      /(?:vidmoly|voe|streamtape|filemoon|dood|doodstream|uqload|ok\.ru|mail\.ru|sibnet|sendvid|streamwish|vidhide|luluvdo|mixdrop|vidoza|upstream|streamsb|supervideo|myvi|vk\.com|rutube|videa|vudeo|wolfstream)/i.test(
+        host
+      ) ||
+      /(?:^|\/)(?:embed|e|v|video|watch|player|play|stream|file|f|d)\/|(?:embed|player|stream|video)[-_./?=]/i.test(
+        path
+      )
+    );
+  } catch (error) {
+    return false;
+  }
+};
 
 const getUrlsFromPage = (predicate: (value: string) => boolean) => {
   const urls = new Set<string>();
@@ -120,6 +164,69 @@ const getUrlsFromPage = (predicate: (value: string) => boolean) => {
   });
 
   return Array.from(urls);
+};
+
+const getEmbeddedPlayerUrlsFromPage = () => {
+  const urls = new Set<string>();
+  const addUrl = (value?: string | null) => {
+    if (!value) {
+      return;
+    }
+
+    const decodedValue = decodeHtmlAttribute(value.trim());
+    const absoluteUrl = getAbsoluteUrl(decodedValue);
+
+    if (absoluteUrl && isLikelyEmbeddedPlayerUrl(absoluteUrl)) {
+      urls.add(absoluteUrl);
+    }
+  };
+
+  Array.from(document.querySelectorAll('iframe, embed')).forEach((element) => {
+    addUrl((element as HTMLIFrameElement | HTMLEmbedElement).src);
+    addUrl(element.getAttribute('data-src'));
+    addUrl(element.getAttribute('data-lazy-src'));
+  });
+
+  const urlAttributeNames = [
+    'href',
+    'src',
+    'data-src',
+    'data-lazy-src',
+    'data-url',
+    'data-href',
+    'data-video',
+    'data-file',
+    'data-embed',
+    'data-player',
+    'data-link',
+  ];
+
+  Array.from(document.querySelectorAll('*')).forEach((element) => {
+    urlAttributeNames.forEach((attributeName) => {
+      addUrl(element.getAttribute(attributeName));
+    });
+  });
+
+  Array.from(document.scripts).forEach((script) => {
+    const text = script.textContent || '';
+    const iframeSrcPattern = /<iframe[^>]+src=\\?["'](.+?)\\?["']/gi;
+    const urlPattern = /https?:\\?\/\\?\/[^"'<>\s]+/gi;
+    let match = iframeSrcPattern.exec(text);
+
+    while (match) {
+      addUrl(match[1]);
+      match = iframeSrcPattern.exec(text);
+    }
+
+    match = urlPattern.exec(text);
+
+    while (match) {
+      addUrl(match[0]);
+      match = urlPattern.exec(text);
+    }
+  });
+
+  return Array.from(urls).slice(0, 12);
 };
 
 const getStreamUrlsFromPage = () => getUrlsFromPage(isStreamUrl);
@@ -198,17 +305,39 @@ const getCandidateMedia = (): HTMLMediaElement | null => {
   return playingMedia || medias[0];
 };
 
+const createEmbeddedPlayerCompanionOptions = (
+  playerUrls: string[],
+  referer: string
+): DownloadOption[] =>
+  playerUrls.map((playerUrl, index) => {
+    let host = 'embedded player';
+
+    try {
+      host = new URL(playerUrl).hostname.replace(/^www\./, '');
+    } catch (error) {
+      host = 'embedded player';
+    }
+
+    return {
+      id: `embedded-player-helper-${index}`,
+      label:
+        index === 0
+          ? `Try ${host} with compagnon`
+          : `${host} player ${index + 1}`,
+      detail: 'Embedded player - companion will inspect the iframe',
+      source: 'companion',
+      formatId: 'bestvideo+bestaudio/best',
+      pageUrl: playerUrl,
+      referer,
+      mergeOutputFormat: 'mp4',
+    };
+  });
+
 const getHtml5DownloadOptions = (): DownloadOption[] => {
   const media = getCandidateMedia();
-
-  if (!media) {
-    throw new Error('No HTML5 media found on this page.');
-  }
-
-  const mediaUrl = media.currentSrc || media.src;
-
   const directMediaUrls = getDirectMediaUrlsFromPage();
   const streamUrls = getStreamUrlsFromPage();
+  const embeddedPlayerUrls = getEmbeddedPlayerUrlsFromPage();
   const companionReferer = getCompanionReferer();
 
   if (streamUrls.length) {
@@ -227,7 +356,38 @@ const getHtml5DownloadOptions = (): DownloadOption[] => {
     }));
   }
 
+  if (!media) {
+    if (embeddedPlayerUrls.length) {
+      return createEmbeddedPlayerCompanionOptions(
+        embeddedPlayerUrls,
+        companionReferer
+      );
+    }
+
+    return [
+      {
+        id: 'html5-page-helper',
+        label: 'Try page with compagnon',
+        detail: 'No direct media URL found - companion will inspect the page',
+        source: 'companion',
+        formatId: 'bestvideo+bestaudio/best',
+        pageUrl: window.location.href,
+        referer: companionReferer,
+        mergeOutputFormat: 'mp4',
+      },
+    ];
+  }
+
+  const mediaUrl = media.currentSrc || media.src;
+
   if (!mediaUrl) {
+    if (embeddedPlayerUrls.length) {
+      return createEmbeddedPlayerCompanionOptions(
+        embeddedPlayerUrls,
+        companionReferer
+      );
+    }
+
     return [
       {
         id: 'html5-page-helper',
@@ -246,6 +406,13 @@ const getHtml5DownloadOptions = (): DownloadOption[] => {
     if (directMediaUrls.length) {
       return directMediaUrls.flatMap((directMediaUrl, index) =>
         createDirectMediaOptions(directMediaUrl, index)
+      );
+    }
+
+    if (embeddedPlayerUrls.length) {
+      return createEmbeddedPlayerCompanionOptions(
+        embeddedPlayerUrls,
+        companionReferer
       );
     }
 

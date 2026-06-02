@@ -556,6 +556,185 @@ const formatBytes = (value) => {
   return `${mb.toFixed(mb >= 100 ? 0 : 1)} MB`;
 };
 
+const decodeHtmlValue = (value) =>
+  String(value || '')
+    .replace(/\\\//g, '/')
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&#038;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+
+const decodePackedString = (value) =>
+  String(value || '')
+    .replace(/\\'/g, "'")
+    .replace(/\\"/g, '"')
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\\\/g, '\\');
+
+const unpackDeanEdwardsPacker = (html) => {
+  const unpacked = [];
+  const pattern =
+    /eval\(function\(p,a,c,k,e,d\)\{[\s\S]*?\}\('((?:\\'|[^'])*)',(\d+),(\d+),'((?:\\'|[^'])*)'\.split\('\|'\)/g;
+  let match = pattern.exec(html);
+
+  while (match) {
+    const payload = decodePackedString(match[1]);
+    const radix = Number(match[2]);
+    const count = Number(match[3]);
+    const dictionary = decodePackedString(match[4]).split('|');
+
+    if (radix > 1 && radix <= 36 && Number.isFinite(count)) {
+      unpacked.push(
+        payload.replace(/\b[0-9a-z]+\b/gi, (token) => {
+          const index = Number.parseInt(token, radix);
+
+          return index < count && dictionary[index] ? dictionary[index] : token;
+        })
+      );
+    }
+
+    match = pattern.exec(html);
+  }
+
+  return unpacked;
+};
+
+const isMediaLikeUrl = (value) =>
+  /\.(?:m3u8|mpd|mp4|webm|m4v|mov|mkv|avi|ts)(?:[?#]|$)/i.test(value) ||
+  /\/(?:hls|dash|manifest|playlist|master)(?:[/?#.-]|$)/i.test(value);
+
+const normalizeExtractedUrl = (value, baseUrl) => {
+  const cleaned = decodeHtmlValue(value)
+    .replace(/\\+$/g, '')
+    .replace(/[),.;]+$/g, '')
+    .trim();
+
+  if (!cleaned) {
+    return '';
+  }
+
+  try {
+    return new URL(cleaned, baseUrl).href;
+  } catch (error) {
+    return '';
+  }
+};
+
+const extractMediaUrlsFromText = (text, baseUrl) => {
+  const urls = new Set();
+  const decoded = decodeHtmlValue(text);
+  const urlPattern = /(?:https?:)?\\?\/\\?\/[^"'<>\s]+/gi;
+  const fileValuePattern =
+    /(?:file|src|source|url|hls|dash)\s*[:=]\s*["']([^"']+)["']/gi;
+  let match = urlPattern.exec(decoded);
+
+  while (match) {
+    const mediaUrl = normalizeExtractedUrl(match[0], baseUrl);
+
+    if (mediaUrl && isMediaLikeUrl(mediaUrl)) {
+      urls.add(mediaUrl);
+    }
+
+    match = urlPattern.exec(decoded);
+  }
+
+  match = fileValuePattern.exec(decoded);
+
+  while (match) {
+    const mediaUrl = normalizeExtractedUrl(match[1], baseUrl);
+
+    if (mediaUrl && isMediaLikeUrl(mediaUrl)) {
+      urls.add(mediaUrl);
+    }
+
+    match = fileValuePattern.exec(decoded);
+  }
+
+  return Array.from(urls);
+};
+
+const fetchText = (targetUrl, referer = '', redirectCount = 0) =>
+  new Promise((resolve, reject) => {
+    if (redirectCount > 5) {
+      reject(new Error('Too many redirects while reading embedded player.'));
+      return;
+    }
+
+    let parsedUrl;
+
+    try {
+      parsedUrl = new URL(targetUrl);
+    } catch (error) {
+      reject(new Error('Invalid embedded player URL.'));
+      return;
+    }
+
+    const transport = parsedUrl.protocol === 'https:' ? https : http;
+    const request = transport.request(
+      parsedUrl,
+      {
+        method: 'GET',
+        headers: {
+          'User-Agent': DEFAULT_USER_AGENT,
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
+          ...(referer ? { Referer: referer } : {}),
+        },
+      },
+      (response) => {
+        const location = response.headers.location;
+
+        if (
+          response.statusCode >= 300 &&
+          response.statusCode < 400 &&
+          location
+        ) {
+          response.resume();
+          fetchText(new URL(location, parsedUrl).href, referer, redirectCount + 1)
+            .then(resolve)
+            .catch(reject);
+          return;
+        }
+
+        let body = '';
+
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          body += chunk;
+
+          if (body.length > 5 * 1024 * 1024) {
+            request.destroy(new Error('Embedded player page is too large.'));
+          }
+        });
+        response.on('end', () => resolve(body));
+      }
+    );
+
+    request.setTimeout(15000, () => {
+      request.destroy(new Error('Embedded player request timed out.'));
+    });
+    request.on('error', reject);
+    request.end();
+  });
+
+const extractEmbeddedMediaUrls = async (pageUrl, referer = '') => {
+  const html = await fetchText(pageUrl, referer || pageUrl);
+  const texts = [html, ...unpackDeanEdwardsPacker(html)];
+  const urls = new Set();
+
+  texts.forEach((text) => {
+    extractMediaUrlsFromText(text, pageUrl).forEach((mediaUrl) => {
+      urls.add(mediaUrl);
+    });
+  });
+
+  return Array.from(urls);
+};
+
 const getProbeSize = (targetUrl, referer = '', method = 'HEAD', redirectCount = 0) =>
   new Promise((resolve, reject) => {
     if (redirectCount > 5) {
@@ -870,6 +1049,33 @@ const buildOptions = (info, pageUrl) => {
   return options;
 };
 
+const buildExtractedMediaOptions = (mediaUrls, pageUrl) =>
+  mediaUrls.slice(0, 8).map((mediaUrl, index) => {
+    const isPlaylist = /\.(?:m3u8|mpd)(?:[?#]|$)/i.test(mediaUrl);
+    let host = 'extracted media';
+
+    try {
+      host = new URL(mediaUrl).hostname.replace(/^www\./, '');
+    } catch (error) {
+      host = 'extracted media';
+    }
+
+    return {
+      id: `extracted-media-${index}`,
+      source: 'companion',
+      formatId: isPlaylist ? 'bestvideo+bestaudio/best' : 'direct',
+      pageUrl: mediaUrl,
+      referer: pageUrl,
+      label: index === 0 ? 'Best extracted media' : `Extracted media ${index + 1}`,
+      detail: formatDetail([
+        isPlaylist ? 'HLS/DASH stream' : 'direct media URL',
+        host,
+        'extracted from embedded player',
+      ]),
+      mergeOutputFormat: 'mp4',
+    };
+  });
+
 const getAudioTracks = (formats) => {
   const byLanguage = new Map();
 
@@ -947,6 +1153,22 @@ const handleFormats = async (request, response, url) => {
       options,
     });
   } catch (error) {
+    try {
+      const mediaUrls = await extractEmbeddedMediaUrls(pageUrl, referer);
+      const options = buildExtractedMediaOptions(mediaUrls, pageUrl);
+
+      if (options.length) {
+        sendJson(response, 200, {
+          ok: true,
+          title: sanitizeText(new URL(pageUrl).hostname || 'embedded-video'),
+          options,
+        });
+        return;
+      }
+    } catch (fallbackError) {
+      // Return the original yt-dlp error below; it is usually more actionable.
+    }
+
     sendJson(response, 500, {
       ok: false,
       error: error instanceof Error ? error.message : 'Failed to read media formats.',
