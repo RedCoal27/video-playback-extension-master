@@ -4,6 +4,11 @@ A Chrome/Brave extension for controlling HTML5 video playback, boosting volume, 
 
 This project is based on the original [Video Playback Extension](https://github.com/sunnyw1212/video-playback-extension). The goal of this fork is to keep the simple media-control popup while adding practical tools for daily video use: persistent playback settings, volume boost, clearer speed controls, and download support for regular HTML5 videos and yt-dlp compatible sites.
 
+<img width="295" height="530" alt="extension image" src="https://github.com/user-attachments/assets/6f3bced8-cd1c-4be0-bb9f-f32569ef2010" />
+
+<img width="603" height="416" alt="image" src="https://github.com/user-attachments/assets/ffc45228-1ad8-486f-aa74-6e0e5f7840c4" />
+
+
 ## Features
 
 - Control playback speed from a simple slider.
