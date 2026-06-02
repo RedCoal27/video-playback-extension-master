@@ -53,19 +53,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
         run: |
+          $assets = Get-ChildItem dist/release -File | ForEach-Object { $_.FullName }
           $releaseExists = gh release view $env:RELEASE_TAG 2>$null
 
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:RELEASE_TAG `
-              dist/release/video-playback-extension.zip `
-              dist/release/video-playback-helper-windows.zip `
-              dist/release/video-playback-source.zip `
+            gh release create $env:RELEASE_TAG @assets `
               --title "Video Playback $env:RELEASE_TAG" `
               --generate-notes
           } else {
-            gh release upload $env:RELEASE_TAG `
-              dist/release/video-playback-extension.zip `
-              dist/release/video-playback-helper-windows.zip `
-              dist/release/video-playback-source.zip `
-              --clobber
+            gh release upload $env:RELEASE_TAG @assets --clobber
           }

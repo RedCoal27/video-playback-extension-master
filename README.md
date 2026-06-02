@@ -91,7 +91,7 @@ Build the helper executable:
 npm run build:helper
 ```
 
-Create local release archives:
+Create local release assets:
 
 ```powershell
 npm run package:release
@@ -99,17 +99,17 @@ npm run package:release
 
 This creates:
 
-- `dist/release/video-playback-extension.zip`
-- `dist/release/video-playback-helper-windows.zip`
-- `dist/release/video-playback-source.zip`
+- `dist/release/video-playback-extension.crx`
+- `dist/release/Video Playback Helper.exe`
+- standalone helper scripts in `dist/release`
 
 ## GitHub Releases
 
 Pushing a tag named `v*`, for example `v3.2.0`, automatically builds and publishes a GitHub release with:
 
 - the packed Chrome/Brave extension
-- the Windows helper package
-- a source archive
+- the standalone Windows helper executable
+- standalone helper scripts
 
 You can also run the `Release` workflow manually from GitHub Actions and provide the target tag.
 

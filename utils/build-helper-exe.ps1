@@ -28,6 +28,27 @@ if (Test-Path $icon) {
   $iconArgs = @("/win32icon:$icon")
 }
 
-& $compiler /nologo /target:winexe /out:"$output" @iconArgs /reference:System.Windows.Forms.dll "$source"
+$resourceArgs = @(
+  "/resource:$icon,helper-icon.ico",
+  "/resource:$(Join-Path $PSScriptRoot 'install-ytdlp.js'),install-ytdlp.js",
+  "/resource:$(Join-Path $PSScriptRoot 'install-ffmpeg.js'),install-ffmpeg.js",
+  "/resource:$(Join-Path $PSScriptRoot 'install-aria2.js'),install-aria2.js",
+  "/resource:$(Join-Path $PSScriptRoot 'ytdlp-server.js'),ytdlp-server.js"
+)
+
+& $compiler `
+  /nologo `
+  /target:winexe `
+  /out:"$output" `
+  @iconArgs `
+  @resourceArgs `
+  /reference:System.Windows.Forms.dll `
+  /reference:System.Drawing.dll `
+  /reference:System.Web.Extensions.dll `
+  "$source"
+
+if ($LASTEXITCODE -ne 0) {
+  throw "Helper executable compilation failed with exit code $LASTEXITCODE."
+}
 
 Write-Host "Built $output"
