@@ -99,17 +99,15 @@ npm run package:release
 
 This creates:
 
-- `dist/release/video-playback-extension.crx`
+- `dist/release/video-playback-extension-unpacked.zip`
 - `dist/release/Video Playback Helper.exe`
-- standalone helper scripts in `dist/release`
 
 ## GitHub Releases
 
 Pushing a tag named `v*`, for example `v3.2.0`, automatically builds and publishes a GitHub release with:
 
-- the packed Chrome/Brave extension
+- the unpacked Chrome/Brave extension archive
 - the standalone Windows helper executable
-- standalone helper scripts
 
 You can also run the `Release` workflow manually from GitHub Actions and provide the target tag.
 
