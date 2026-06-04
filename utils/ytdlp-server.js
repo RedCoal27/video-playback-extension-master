@@ -13,6 +13,8 @@ const LOCAL_YTDLP = path.join(__dirname, '..', 'tools', 'yt-dlp.exe');
 const LOCAL_FFMPEG_DIR = path.join(__dirname, '..', 'tools', 'ffmpeg', 'bin');
 const LOCAL_FFMPEG = path.join(LOCAL_FFMPEG_DIR, 'ffmpeg.exe');
 const LOCAL_ARIA2C = path.join(__dirname, '..', 'tools', 'aria2', 'aria2c.exe');
+const LOCAL_NODE = path.join(__dirname, '..', 'tools', 'node', 'node.exe');
+const LOCAL_NODE_DIR = path.dirname(LOCAL_NODE);
 const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
 const YOUTUBE_EXTRACTOR_ARGS = [
@@ -56,6 +58,23 @@ const commandCandidates = [
   { command: 'python3', args: ['-m', 'yt_dlp'] },
 ].filter(Boolean);
 
+const getPathKey = () =>
+  Object.keys(process.env).find((key) => key.toLowerCase() === 'path') || 'PATH';
+
+const getChildProcessEnv = () => {
+  const env = { ...process.env };
+  const pathKey = getPathKey();
+  const pathParts = [env[pathKey] || ''];
+
+  if (fs.existsSync(LOCAL_NODE)) {
+    pathParts.unshift(LOCAL_NODE_DIR);
+  }
+
+  env[pathKey] = pathParts.filter(Boolean).join(path.delimiter);
+
+  return env;
+};
+
 const sendJson = (response, statusCode, payload) => {
   response.writeHead(statusCode, {
     'Access-Control-Allow-Origin': '*',
@@ -90,6 +109,7 @@ const findYtDlp = () => {
   for (const candidate of commandCandidates) {
     const result = spawnSync(candidate.command, [...candidate.args, '--version'], {
       encoding: 'utf8',
+      env: getChildProcessEnv(),
       windowsHide: true,
     });
 
@@ -116,6 +136,7 @@ const runYtDlp = (args, timeoutMs = 0) =>
     }
 
     const child = spawn(candidate.command, [...candidate.args, ...args], {
+      env: getChildProcessEnv(),
       windowsHide: true,
     });
     let stdout = '';
@@ -309,6 +330,7 @@ const parseYtDlpLine = (line) => {
 const startYtDlp = (args, job, fallbackArgs = null, retryCount = 0) => {
   const candidate = findYtDlp();
   const child = spawn(candidate.command, [...candidate.args, ...args], {
+    env: getChildProcessEnv(),
     windowsHide: true,
   });
   let stdoutBuffer = '';
